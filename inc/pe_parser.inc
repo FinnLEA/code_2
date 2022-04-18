@@ -30,8 +30,15 @@ Space struct
     isize		DWORD	?
 Space ends
 
+SC_PARAMS struct
+    startRVA        DWORD ?
+    sizeCurrSc      DWORD ?
+    globalSize      DWORD ?
+SC_PARAMS ends
+
 LoadPeFile proto CurrentStdcallNotation :ptr byte, :ptr byte, :cword
 UnloadPeFile proto CurrentStdcallNotation :cword
 AlignToTop proto CurrentStdcallNotation :cword, :cword
 AlignToBottom proto CurrentStdcallNotation :cword, :cword
 RvaToOffset proto CurrentStdcallNotation :cword, :cword 
+
