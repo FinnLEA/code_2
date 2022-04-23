@@ -164,7 +164,7 @@ UnloadPeFile proc CurrentStdcallNotation pe:cword
 UnloadPeFile endp
 
 
-AlignToTop proc CurrentStdcallNotation value:cword, alignv:cword
+AlignToTop proc CurrentStdcallNotation uses cbx cdi csi value:cword, alignv:cword
 
 	local maskv:cword
 	
@@ -213,7 +213,7 @@ AlignToBottom endp
 ;
 ; Возвращает файловое смещение по RVA.
 ;
-RvaToOffset proc CurrentStdcallNotation uses ccx cdx cdi rva:cword, pe:cword
+RvaToOffset proc CurrentStdcallNotation uses ccx cdx cdi rva:dword, pe:cword
 
 	local currentSection:cword
 	local numberOfSections:dword
