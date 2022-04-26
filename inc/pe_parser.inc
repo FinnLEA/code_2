@@ -155,5 +155,5 @@ LoadPeFile proto CurrentStdcallNotation :ptr byte, :ptr byte, :cword
 UnloadPeFile proto CurrentStdcallNotation :cword
 AlignToTop proto CurrentStdcallNotation :cword, :cword
 AlignToBottom proto CurrentStdcallNotation :cword, :cword
-RvaToOffset proto CurrentStdcallNotation :DWORD, :cword 
-
+; 
+RvaToOffset proto CurrentStdcallNotation :DWORD, :cword, :cword 

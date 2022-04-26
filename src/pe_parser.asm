@@ -213,7 +213,7 @@ AlignToBottom endp
 ;
 ; Возвращает файловое смещение по RVA.
 ;
-RvaToOffset proc CurrentStdcallNotation uses ccx cdx cdi rva:dword, pe:cword
+RvaToOffset proc CurrentStdcallNotation uses ccx cdx cdi rva:dword, pe:cword, secInd:cword
 
 	local currentSection:cword
 	local numberOfSections:dword
@@ -266,6 +266,10 @@ RvaToOffset proc CurrentStdcallNotation uses ccx cdx cdi rva:dword, pe:cword
 			sub cax, cdi
 			mov edi, [edx].IMAGE_SECTION_HEADER.PointerToRawData
 			add cax, cdi
+			.if [secInd] != NULL
+				mov cdi, [secInd]
+				mov dword ptr [cdi], ecx 
+			.endif
 			ret
 
 		.endif
@@ -276,8 +280,6 @@ RvaToOffset proc CurrentStdcallNotation uses ccx cdx cdi rva:dword, pe:cword
 	xor cax, cax
 	ret
 RvaToOffset endp
-
-
 
 msg_pe_open_error:
 db "Error: Failed to open file", 10, 0

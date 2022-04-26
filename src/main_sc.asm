@@ -159,7 +159,7 @@ HandleExceptionTable proto CurrentStdcallNotation :cword, :cword, :dword, :dword
 HandleDebugTable proto CurrentStdcallNotation :cword, :cword, :dword, :dword, :dword
 HandleLoadConfTable proto CurrentStdcallNotation :cword, :cword, :dword, :dword, :dword
 HandleRelocs proto CurrentStdcallNotation :cword, :cword, :dword, :dword
-HandleResourceTable :cword, :cword, :dword, :dword
+HandleResourceTable proto CurrentStdcallNotation :cword, :cword, :dword, :dword, :dword
 FindTargetSection proto CurrentStdcallNotation :cword
 
 DefineStdcallProto MessageBoxA, 4
@@ -530,6 +530,7 @@ HandleAllTables proc CurrentStdcallNotation uses cbx cdi cdx pe:cword, scRVA:dwo
     local countSec:dword
     local fileAligment:dword
     local i:cword
+    local ind:dword
 
     ifdef _WIN64
 		mov [rbp + 10h], rcx
@@ -545,7 +546,7 @@ HandleAllTables proc CurrentStdcallNotation uses cbx cdi cdx pe:cword, scRVA:dwo
     mov edx, [cdi].IMAGE_OPTIONAL_HEADER.FileAlignment
     mov [fileAligment], edx
 	lea cdi, [cdi].IMAGE_OPTIONAL_HEADER.DataDirectory
-
+    
     
     ;DbgBreak
     xor ccx, ccx
@@ -553,10 +554,11 @@ HandleAllTables proc CurrentStdcallNotation uses cbx cdi cdx pe:cword, scRVA:dwo
     .while [i] < IMAGE_NUMBEROF_DIRECTORY_ENTRIES
         xor cax, cax
         mov eax, [cdi].IMAGE_DATA_DIRECTORY.VirtualAddress
-        .if eax >= [scRVA] && [cdi].IMAGE_DATA_DIRECTORY.isize != 0
+        .if [cdi].IMAGE_DATA_DIRECTORY.isize != 0
             mov csi, [pe]
             mov csi, [csi].PeHeaders.mem
-            invoke RvaToOffset, cax, [pe]
+            lea ccx, [ind] 
+            invoke RvaToOffset, cax, [pe], ccx
             add csi, cax        ; csi = pe.mem + VA
             .if [i] == IMAGE_DIRECTORY_ENTRY_IMPORT
                 ;DbgBreak
@@ -568,33 +570,64 @@ HandleAllTables proc CurrentStdcallNotation uses cbx cdi cdx pe:cword, scRVA:dwo
             .elseif [i] == IMAGE_DIRECTORY_ENTRY_DEBUG
                 ;invoke AlignToTop, [scSize], [fileAligment]
                 invoke HandleDebugTable, [pe], csi, [scRVA], [f_diff], [v_diff]
-            .elseif [i] == IMAGE_DIRECTORY_ENTRY_BASERELOC
-                invoke HandleRelocs, [pe], csi, [scRVA], [v_diff]
+            ;.elseif [i] == IMAGE_DIRECTORY_ENTRY_BASERELOC
+            ;    invoke HandleRelocs, [pe], csi, [scRVA], [v_diff]
             .elseif [i] == IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG
                 ;invoke AlignToTop, [scSize], [fileAligment]
+                ;DbgBreak
                 invoke HandleLoadConfTable, [pe], csi, [scRVA], [f_diff], [v_diff]
             .elseif [i] == IMAGE_DIRECTORY_ENTRY_RESOURCE
-                invoke HandleResourceTable, [pe], csi, [scRVA], [v_diff]
+                invoke HandleResourceTable, [pe], csi, [scRVA], [v_diff], [ind]
             .endif
             
-            mov eax, [v_diff]
-            add [cdi].IMAGE_DATA_DIRECTORY.VirtualAddress, eax
+            mov eax, [scRVA]
+            .if [i] != IMAGE_DIRECTORY_ENTRY_BASERELOC && [cdi].IMAGE_DATA_DIRECTORY.VirtualAddress >= eax
+                mov eax, [v_diff]
+                add [cdi].IMAGE_DATA_DIRECTORY.VirtualAddress, eax
+            .endif
         .endif
         inc [i]
         add cdi, IMAGE_DATA_DIRECTORY_SIZE
     .endw    
 
-   
+    ;DbgBreak
+    ; релоки в последнюю очередь 
+    mov cax, [pe]       
+    mov cax, [cax].PeHeaders.nthead
+    lea cdi, [cax].IMAGE_NT_HEADERS.OptionalHeader;.DataDirectory
+    lea cdi, [cdi].IMAGE_OPTIONAL_HEADER.DataDirectory
+    xor cax, cax
+    add cax, IMAGE_DIRECTORY_ENTRY_BASERELOC
+    imul cax, IMAGE_DATA_DIRECTORY_SIZE
+    add cdi, cax
+    .if [cdi].IMAGE_DATA_DIRECTORY.isize != 0
+        invoke RvaToOffset, [cdi].IMAGE_DATA_DIRECTORY.VirtualAddress, [pe], NULL
+        mov csi, [pe]
+        mov csi, [csi].PeHeaders.mem
+        add csi, cax
 
+        invoke HandleRelocs, [pe], csi, [scRVA], [v_diff]
+        .if [cdi].IMAGE_DATA_DIRECTORY.VirtualAddress >= eax
+            mov eax, [v_diff]
+            add [cdi].IMAGE_DATA_DIRECTORY.VirtualAddress, eax
+        .endif
+    .endif
 
     ret
 HandleAllTables endp
 
-RecurRCNodeNormalize proc CurrentStdcallNotation uses cbx cdi csi pe:cword, dirAddr:dword, scRVA:dword. v_diff:dword
+HandleResourceTable proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pDirAddr:cword, scRVA:dword, allignScSize:dword, secInd:dword
 
-RecurRCNodeNormalize endp
-
-HandleResourceTable proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pILCT:cword, scRVA:dword, allignScSize:dword
+    local pIRD:cword    ;PIMAGE_RESOURCE_DIRECTORY
+    local pIRDE:cword   ; PIMAGE_RESOURCE_DIRECTORY_ENTRY
+    local pIRDataE:cword    ; PIMAGE_RESOURCE_DATA_ENTRY
+    local count:dword
+    local i:dword
+    local pMem:cword
+    local lInd:dword
+    ;local secInd:dword
+    local pSectionMem:cword
+    local pSection:cword
 
     ifdef _WIN64
 		mov [rbp + 10h], rcx
@@ -603,8 +636,76 @@ HandleResourceTable proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pILCT
 		mov [rbp + 28h], r9
 	endif
 
+    ;DbgBreak
+    mov cdi, [pe]
+    mov cax, [cdi].PeHeaders.mem
+    mov [pMem], cax
+    mov cdi, [cdi].PeHeaders.sections
+    mov cax, [secInd]
+    imul cax, IMAGE_SIZEOF_SECTION_HEADER
+    add cdi, cax
+    mov [pSection], cdi
+    invoke RvaToOffset, [cdi].IMAGE_SECTION_HEADER.VirtualAddress, [pe], NULL
+    add cax, [pMem]
+    mov [pSectionMem], cax
 
+    ; count = pdir->NumberOfIdEntries + pdir->NumberOfNamedEntries;
+    mov ccx, [pDirAddr]
+    xor cax, cax
+    mov ax, [ccx].IMAGE_RESOURCE_DIRECTORY.NumberOfIdEntries
+    add ax, [ccx].IMAGE_RESOURCE_DIRECTORY.NumberOfNamedEntries
+    mov [count], eax
 
+    ; pedir = (PIMAGE_RESOURCE_DIRECTORY_ENTRY)((DWORD)pdir + sizeof(IMAGE_RESOURCE_DIRECTORY));
+    mov cax, ccx
+    add cax, sizeof(IMAGE_RESOURCE_DIRECTORY)
+    mov [pIRDE], cax
+
+    xor ecx, ecx
+    mov [i], ecx
+    .while ecx < [count]
+        xor cax, cax
+        mov cax, ccx
+        imul cax, sizeof(IMAGE_RESOURCE_DIRECTORY_ENTRY)
+        mov csi, [pIRDE]
+        add csi, cax
+        mov edx, [scRVA]
+        ;assume csi: ptr IMAGE_RESOURCE_DIRECTORY_ENTRY
+        mov eax, dword ptr [csi]
+        and eax, 07fffffffh
+        .if dword ptr [csi] & 080000000h && \ ;[csi].rName
+            eax >= edx
+
+            mov edx, [allignScSize]
+            add [csi].NameOffset, edx
+        .endif
+
+        .if dword ptr [csi+4] & 080000000h    ; [csi].rDirectory
+            mov cdx, [pSection]
+            mov edx, [cdx].IMAGE_SECTION_HEADER.VirtualAddress
+            mov eax, [csi+4]
+            and eax, 07fffffffh
+            add edx, eax
+            lea ccx, [lInd]
+            invoke RvaToOffset, edx, [pe], ccx
+            add cax, [pMem]
+            invoke HandleResourceTable, [pe], cax, [scRVA], [allignScSize], [lInd]
+        .else
+            mov cax, [pSectionMem]
+            add cax, dword ptr [csi+4] ; pedir[i].OffsetToData
+            mov [pIRDataE], cax
+            mov edx, [scRVA]
+            .if dword ptr [cax].IMAGE_RESOURCE_DATA_ENTRY.OffsetToData >= edx
+                mov edx, [allignScSize]
+                add dword ptr [cax].IMAGE_RESOURCE_DATA_ENTRY.OffsetToData, edx
+            .endif
+        .endif
+
+        inc [i]
+        mov ecx, [i]
+    .endw
+
+    ret
 HandleResourceTable endp
 
 HandleLoadConfTable proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pILCT:cword, scRVA:dword, scSize:dword, allignScSize:dword
@@ -612,6 +713,7 @@ HandleLoadConfTable proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pILCT
     local pBase:cword
     local ib:cword
     local i:cword
+   ; local pMem:cword
 
     ifdef _WIN64
 		mov [rbp + 10h], rcx
@@ -620,20 +722,25 @@ HandleLoadConfTable proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pILCT
 		mov [rbp + 28h], r9
 	endif
 
+    ;DbgBreak
     mov cdi, [pe]
-    mov ccx, [pe].PeHeaders.nthead
+    mov ccx, [cdi].PeHeaders.nthead
     lea ccx, [ccx].IMAGE_NT_HEADERS.OptionalHeader
     mov ccx, [ccx].IMAGE_OPTIONAL_HEADER.ImageBase
     mov [ib], ccx
 
-    mov cdi, [pe].PeHeaders.mem
+    mov cdi, [cdi].PeHeaders.mem
     mov [pBase], cdi
 
     mov cdi, [pILCT]
     .if [cdi].IMAGE_LOAD_CONFIG_DIRECTORY_FULL.SEHandlerTable != 0
         mov ccx, [cdi].IMAGE_LOAD_CONFIG_DIRECTORY_FULL.SEHandlerTable
         sub ccx, [ib]
-        invoke RvaToOffset, ccx, [pe]
+        invoke RvaToOffset, ccx, [pe], NULL
+        .if cax == 0
+            ret
+        .endif
+        add cax, [pBase]
         mov edx, [scRVA]
         mov ecx, [allignScSize]
         xor ecx, ecx
@@ -690,7 +797,7 @@ HandleRelocs proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pIRT:cword, 
         xor cdx, cdx
         mov ccx, [pBlocks]
         .while word ptr [ccx] != 0
-            invoke RvaToOffset, [cdi].IMAGE_BASE_RELOCATION.VirtualAddress, [pe]
+            invoke RvaToOffset, [cdi].IMAGE_BASE_RELOCATION.VirtualAddress, [pe], NULL
             mov csi, [pBase]
             add csi, cax    ; pe->mem + VA
             xor cax, cax
@@ -810,7 +917,7 @@ HandleImportTable proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pIDT:cw
             mov esi, [cdi].IMAGE_IMPORT_DESCRIPTOR.FirstThunk
         .endif
         xor cax, cax
-        invoke RvaToOffset, csi, [pe]
+        invoke RvaToOffset, csi, [pe], NULL
         mov csi, [pe]
         mov cdx, [csi].PeHeaders.mem
         add cax, cdx    ; csi = iat
@@ -867,7 +974,7 @@ HandleExportTable proc CurrentStdcallNotation uses cbx cdi pe:cword, pEDT:cword,
 
     xor cax, cax
     .if [cdi].IMAGE_EXPORT_DIRECTORY.AddressOfFunctions != NULL
-        invoke RvaToOffset, [cdi].IMAGE_EXPORT_DIRECTORY.AddressOfFunctions, [pe]
+        invoke RvaToOffset, [cdi].IMAGE_EXPORT_DIRECTORY.AddressOfFunctions, [pe], NULL
         mov csi, [pe]
         mov csi, [csi].PeHeaders.mem
         add csi, cax
@@ -888,7 +995,7 @@ HandleExportTable proc CurrentStdcallNotation uses cbx cdi pe:cword, pEDT:cword,
     .endif
 
     .if [cdi].IMAGE_EXPORT_DIRECTORY.AddressOfNames != NULL
-        invoke RvaToOffset, [cdi].IMAGE_EXPORT_DIRECTORY.AddressOfNames, [pe]
+        invoke RvaToOffset, [cdi].IMAGE_EXPORT_DIRECTORY.AddressOfNames, [pe], NULL
         mov csi, [pe]
         mov csi, [csi].PeHeaders.mem
         add csi, cax
