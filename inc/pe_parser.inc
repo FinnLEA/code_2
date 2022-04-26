@@ -31,9 +31,14 @@ Space struct
 Space ends
 
 SC_PARAMS struct
-    startRVA        DWORD ?
-    sizeCurrSc      DWORD ?
-    globalSize      DWORD ?
+    startRVA        DWORD ? ; RVA начала шеллкода
+    scSize          DWORD ? ; чистый размер шеллкода (без вырвнивания) 
+    f_diff          DWORD ? ; разница для сдвига (файловое выр-ие)
+    v_diff          DWORD ? ; разница для сдвига (виртуальное выр-ие)
+    f_Size          DWORD ? ; размер шеллкода выравненный по FileAligment
+    v_Size          DWORD ? ; размер шеллкода выравненный по SectionAligment
+    SizeOfTargetSec DWORD ? ; оригинальный VirtualSize кодовой секции
+    originalEP      DWORD ? ; оригинальная точка входа
 SC_PARAMS ends
 
 ; typedef struct _IMAGE_LOAD_CONFIG_DIRECTORY64 {

