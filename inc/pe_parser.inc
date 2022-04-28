@@ -61,40 +61,40 @@ SC_PARAMS ends
     ; WORD       CSDVersion;
     ; WORD       DependentLoadFlags;
     ; ULONGLONG  EditList;                       // VA
-;     ULONGLONG  SecurityCookie;                 // VA
-;     ULONGLONG  SEHandlerTable;                 // VA
-;     ULONGLONG  SEHandlerCount;
-;     ULONGLONG  GuardCFCheckFunctionPointer;    // VA
-;     ULONGLONG  GuardCFDispatchFunctionPointer; // VA
-;     ULONGLONG  GuardCFFunctionTable;           // VA
-;     ULONGLONG  GuardCFFunctionCount;
-;     DWORD      GuardFlags;
-;     IMAGE_LOAD_CONFIG_CODE_INTEGRITY CodeIntegrity;
-;     ULONGLONG  GuardAddressTakenIatEntryTable; // VA
-;     ULONGLONG  GuardAddressTakenIatEntryCount;
-;     ULONGLONG  GuardLongJumpTargetTable;       // VA
-;     ULONGLONG  GuardLongJumpTargetCount;
-;     ULONGLONG  DynamicValueRelocTable;         // VA
-;     ULONGLONG  CHPEMetadataPointer;            // VA
-;     ULONGLONG  GuardRFFailureRoutine;          // VA
-;     ULONGLONG  GuardRFFailureRoutineFunctionPointer; // VA
-;     DWORD      DynamicValueRelocTableOffset;
-;     WORD       DynamicValueRelocTableSection;
-;     WORD       Reserved2;
-;     ULONGLONG  GuardRFVerifyStackPointerFunctionPointer; // VA
-;     DWORD      HotPatchTableOffset;
-;     DWORD      Reserved3;
-;     ULONGLONG  EnclaveConfigurationPointer;     // VA
-;     ULONGLONG  VolatileMetadataPointer;         // VA
-;     ULONGLONG  GuardEHContinuationTable;        // VA
-;     ULONGLONG  GuardEHContinuationCount;
+    ;     ULONGLONG  SecurityCookie;                 // VA
+    ;     ULONGLONG  SEHandlerTable;                 // VA
+    ;     ULONGLONG  SEHandlerCount;
+    ;     ULONGLONG  GuardCFCheckFunctionPointer;    // VA
+    ;     ULONGLONG  GuardCFDispatchFunctionPointer; // VA
+    ;     ULONGLONG  GuardCFFunctionTable;           // VA
+    ;     ULONGLONG  GuardCFFunctionCount;
+    ;     DWORD      GuardFlags;
+    ;     IMAGE_LOAD_CONFIG_CODE_INTEGRITY CodeIntegrity;
+    ;     ULONGLONG  GuardAddressTakenIatEntryTable; // VA
+    ;     ULONGLONG  GuardAddressTakenIatEntryCount;
+    ;     ULONGLONG  GuardLongJumpTargetTable;       // VA
+    ;     ULONGLONG  GuardLongJumpTargetCount;
+    ;     ULONGLONG  DynamicValueRelocTable;         // VA
+    ;     ULONGLONG  CHPEMetadataPointer;            // VA
+    ;     ULONGLONG  GuardRFFailureRoutine;          // VA
+    ;     ULONGLONG  GuardRFFailureRoutineFunctionPointer; // VA
+    ;     DWORD      DynamicValueRelocTableOffset;
+    ;     WORD       DynamicValueRelocTableSection;
+    ;     WORD       Reserved2;
+    ;     ULONGLONG  GuardRFVerifyStackPointerFunctionPointer; // VA
+    ;     DWORD      HotPatchTableOffset;
+    ;     DWORD      Reserved3;
+    ;     ULONGLONG  EnclaveConfigurationPointer;     // VA
+    ;     ULONGLONG  VolatileMetadataPointer;         // VA
+    ;     ULONGLONG  GuardEHContinuationTable;        // VA
+    ;     ULONGLONG  GuardEHContinuationCount;
 ; } IMAGE_LOAD_CONFIG_DIRECTORY64, *PIMAGE_LOAD_CONFIG_DIRECTORY64;
 
 ; typedef struct _IMAGE_LOAD_CONFIG_CODE_INTEGRITY {
-;     WORD    Flags;          // Flags to indicate if CI information is available, etc.
-;     WORD    Catalog;        // 0xFFFF means not available
-;     DWORD   CatalogOffset;
-;     DWORD   Reserved;       // Additional bitmask to be defined later
+    ;     WORD    Flags;          // Flags to indicate if CI information is available, etc.
+    ;     WORD    Catalog;        // 0xFFFF means not available
+    ;     DWORD   CatalogOffset;
+    ;     DWORD   Reserved;       // Additional bitmask to be defined later
 ; } IMAGE_LOAD_CONFIG_CODE_INTEGRITY, *PIMAGE_LOAD_CONFIG_CODE_INTEGRITY;
 
 IMAGE_LOAD_CONFIG_CODE_INTEGRITY struct
