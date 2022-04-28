@@ -32,7 +32,9 @@ Space ends
 
 SC_PARAMS struct
     startRVA        DWORD ? ; RVA начала шеллкода
+    targetSecRVA    DWORD ? ; VA начала нужной кодовой секции
     scSize          DWORD ? ; чистый размер шеллкода (без вырвнивания) 
+    alScSize        DWORD ? ; размер шеллкода с выравниванием до страницы
     f_diff          DWORD ? ; разница для сдвига (файловое выр-ие)
     v_diff          DWORD ? ; разница для сдвига (виртуальное выр-ие)
     f_Size          DWORD ? ; размер шеллкода выравненный по FileAligment

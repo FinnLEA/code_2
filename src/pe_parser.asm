@@ -18,7 +18,7 @@ LoadPeFile proc CurrentStdcallNotation uses cdi filename:ptr byte, pe:ptr byte, 
     mov [cdi].filename, cax
     
 	; открываем файл (получаем файловый дескриптор)
-    invoke sc_CreateFileA, [filename], GENERIC_READ or GENERIC_WRITE or GENERIC_EXECUTE, 0, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0
+    invoke64 sc_CreateFileA, [filename], GENERIC_READ or GENERIC_WRITE or GENERIC_EXECUTE, 0, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0
     mov [cdi].fd, cax
     .if [cdi].fd == INVALID_HANDLE_VALUE
 		invoke sc_printf, addr [cbx + msg_pe_open_error]
@@ -232,7 +232,7 @@ RvaToOffset proc CurrentStdcallNotation uses ccx cdx cdi rva:dword, pe:cword, se
 	mov eax, eax
 	
 	; if (rva > SizeOfImage) return 0;
-	.if [rva] > cax
+	.if [rva] > eax
 		mov cax, 0
 		ret
 	.endif
@@ -257,14 +257,14 @@ RvaToOffset proc CurrentStdcallNotation uses ccx cdx cdi rva:dword, pe:cword, se
 		mov eax, [cax].IMAGE_SECTION_HEADER.VirtualAddress
 		add cdx, cax
 
-		.if [rva] >= cax && [rva] <= cdx
+		.if [rva] >= eax && [rva] <= edx
 		;if [rva] >= VirtualAddress && [rva] <= VirtualSize + VirtualAddress
 			;return rva - sections[i].VirtualAddress + sections[i].PointerToRawData;
-			mov cax, [rva]
+			mov eax, [rva]
 			mov cdx, [currentSection]
-			mov edi, [edx].IMAGE_SECTION_HEADER.VirtualAddress
+			mov edi, [cdx].IMAGE_SECTION_HEADER.VirtualAddress
 			sub cax, cdi
-			mov edi, [edx].IMAGE_SECTION_HEADER.PointerToRawData
+			mov edi, [cdx].IMAGE_SECTION_HEADER.PointerToRawData
 			add cax, cdi
 			.if [secInd] != NULL
 				mov cdi, [secInd]

