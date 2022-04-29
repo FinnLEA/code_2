@@ -3,6 +3,7 @@ LoadPeFile proc CurrentStdcallNotation uses cdi filename:ptr byte, pe:ptr byte, 
 
 	local comp64:cword
 	local comp64_2:cword
+	local pCurrNtHead:cword
 	
 	ifdef _WIN64
 		mov [rbp + 10h], rcx
@@ -78,6 +79,7 @@ LoadPeFile proc CurrentStdcallNotation uses cdi filename:ptr byte, pe:ptr byte, 
 	.endif
 	
 	; указатель на NT заголовок
+	DbgBreak
 	mov cdx, [pe]
 	mov cax, [cdx].PeHeaders.mem
 	mov cdx, [cdx].PeHeaders.doshead
@@ -107,10 +109,29 @@ LoadPeFile proc CurrentStdcallNotation uses cdi filename:ptr byte, pe:ptr byte, 
 		mov cdx, [cdi].PeHeaders.nthead
 		mov [cdi].PeHeaders.nthead64, cdx
 		mov [cdi].PeHeaders.nthead, 0
+		mov [pCurrNtHead], cdx
+		
+		lea cdx, [cdx].IMAGE_NT_HEADERS64.OptionalHeader
+		mov ecx, dword ptr [cdx].IMAGE_OPTIONAL_HEADER64.ImageBase
+		lea cax, [cdi].PeHeaders.ib
+		mov [cax].U_ADDR.addr_.val32.lo, ecx
+		
+		lea cdx, [cdx].IMAGE_OPTIONAL_HEADER64.ImageBase
+		lea cdx, [cdx + 4]
+		mov ecx, dword ptr [cdx]
+		mov [cax].U_ADDR.addr_.val32.hi, ecx
 	.elseif ax == IMAGE_NT_OPTIONAL_HDR32_MAGIC
 		mov cdi, [pe]
 		mov byte ptr [cdi].PeHeaders.isPe64, 0
 		mov [cdi].PeHeaders.nthead64, 0
+		mov ccx, [cdi].PeHeaders.nthead
+		mov [pCurrNtHead], ccx
+
+		lea cdx, [ccx].IMAGE_NT_HEADERS32.OptionalHeader
+		mov ecx, dword ptr [cdx].IMAGE_OPTIONAL_HEADER32.ImageBase
+		lea cax, [cdi].PeHeaders.ib
+		mov [cax].U_ADDR.addr_.val32.lo, ecx
+		mov [cax].U_ADDR.addr_.val32.hi, 0
 	.else
 		invoke sc_printf, addr [cbx + msg_pe_format_error]
 		xor eax, eax
@@ -118,11 +139,11 @@ LoadPeFile proc CurrentStdcallNotation uses cdi filename:ptr byte, pe:ptr byte, 
 	.endif
 
 	
-	mov cax, [pe]
-	mov cax, [cax].PeHeaders.nthead
+	;mov cax, [pe]
+	mov cax, [pCurrNtHead]
 	lea cax, [cax].IMAGE_NT_HEADERS.OptionalHeader
-	mov cdx, [pe]
-	mov cdx, [cdx].PeHeaders.nthead
+	;mov cdx, [pe]
+	mov cdx, [pCurrNtHead]
 	lea cdx, [cdx].IMAGE_NT_HEADERS.FileHeader
 	lea cdx, [cdx].IMAGE_FILE_HEADER.SizeOfOptionalHeader
 	movzx ecx, word ptr [cdx]
@@ -130,8 +151,7 @@ LoadPeFile proc CurrentStdcallNotation uses cdi filename:ptr byte, pe:ptr byte, 
 	mov cdx, [pe]
 	mov [cdx].PeHeaders.sections, cax
 	
-	mov cdx, [pe]
-	mov cdx, [cdx].PeHeaders.nthead
+	mov cdx, [pCurrNtHead]
 	lea cdx, [cdx].IMAGE_NT_HEADERS.FileHeader
 	movzx eax, word ptr [cdx].IMAGE_FILE_HEADER.NumberOfSections
 	mov cdx, [pe]
@@ -223,6 +243,8 @@ RvaToOffset proc CurrentStdcallNotation uses ccx cdx cdi rva:dword, pe:cword, se
 
 	local currentSection:cword
 	local numberOfSections:dword
+	local pCurrNtHead:cword
+	local is_x64:byte
 	
 	ifdef _WIN64
 		mov [rbp + 10h], rcx
@@ -232,17 +254,21 @@ RvaToOffset proc CurrentStdcallNotation uses ccx cdx cdi rva:dword, pe:cword, se
 	endif
 	
 	mov cdx, [pe]
-	mov cax, [cdx].PeHeaders.nthead
-	lea cax, [cax].IMAGE_NT_HEADERS.OptionalHeader
-	mov eax, [cax].IMAGE_OPTIONAL_HEADER.SizeOfImage
-	mov eax, eax
-	
+	.if byte ptr [cdx].PeHeaders.isPe64 == 1
+		mov cax, [cdx].PeHeaders.nthead64
+		lea cax, [cax].IMAGE_NT_HEADERS64.OptionalHeader
+		mov eax, [cax].IMAGE_OPTIONAL_HEADER64.SizeOfImage
+	.else
+		mov cax, [cdx].PeHeaders.nthead
+		lea cax, [cax].IMAGE_NT_HEADERS32.OptionalHeader
+		mov eax, [cax].IMAGE_OPTIONAL_HEADER32.SizeOfImage
+	.endif
+
 	; if (rva > SizeOfImage) return 0;
 	.if [rva] > eax
 		mov cax, 0
 		ret
 	.endif
-	
 	
 	mov cdx, [pe]
 	mov cdi, [cdx].PeHeaders.sections

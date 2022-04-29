@@ -1,3 +1,15 @@
+LH_ADDR struct
+    lo  DWORD ?
+    hi  DWORD ?
+LH_ADDR ends 
+
+U_ADDR struct 
+    union addr_
+        val64 qword ?
+        val32 LH_ADDR <>
+    ends
+U_ADDR ends
+
 PeHeaders struct
 
     filename 	cword   ?   ;ШШШ ШШШШШ
@@ -24,17 +36,10 @@ PeHeaders struct
     fileAligment DWORD  ?
     sectionAligment DWORD ?
 
+    ib          U_ADDR <>
     isPe64      byte    ?
 
 PeHeaders ends
-
-Space struct
-    startRVA	DWORD	?
-    endRVA		DWORD	?
-    startRAW	DWORD	?
-    endRAW		DWORD	?
-    isize		DWORD	?
-Space ends
 
 SC_PARAMS struct
     startRVA        DWORD ? ; RVA начала шеллкода
@@ -117,7 +122,7 @@ SE_HANDLER_TABLE struct
     entry4  cword ?
 SE_HANDLER_TABLE ends
 
-IMAGE_LOAD_CONFIG_DIRECTORY_FULL	struct 
+IMAGE_LOAD_CONFIG_DIRECTORY_FULL64	struct 
     Characteristics	DWORD	?
     TimeDateStamp	DWORD	?
     MajorVersion	WORD	?
@@ -162,7 +167,54 @@ IMAGE_LOAD_CONFIG_DIRECTORY_FULL	struct
     VolatileMetadataPointer cword ?;          // VA
     GuardEHContinuationTable cword ?;        // VA
     GuardEHContinuationCount cword ?;
-IMAGE_LOAD_CONFIG_DIRECTORY_FULL	ends
+IMAGE_LOAD_CONFIG_DIRECTORY_FULL64	ends
+
+IMAGE_LOAD_CONFIG_DIRECTORY_FULL32	struct 
+    Characteristics	DWORD	?
+    TimeDateStamp	DWORD	?
+    MajorVersion	WORD	?
+    MinorVersion	WORD	?
+    GlobalFlagsClear	DWORD	?
+    GlobalFlagsSet	DWORD	?
+    CriticalSectionDefaultTimeout	DWORD	?
+    DeCommitFreeBlockThreshold	DWORD	?
+    DeCommitTotalFreeThreshold	DWORD	?
+    LockPrefixTable	DWORD	?
+    MaximumAllocationSize	DWORD	?
+    VirtualMemoryThreshold	DWORD	?
+    ProcessAffinityMask	DWORD	?
+    ProcessHeapFlags	DWORD	?
+    CSDVersion	WORD	?
+    Reserved1	WORD	?
+    EditList	DWORD	?
+    SecurityCookie  DWORD ?             ; handle in reloc
+    SEHandlerTable  DWORD ?          ;  handle in reloc                 // VA
+    SEHandlerCount  DWORD ?      ;
+    GuardCFCheckFunctionPointer     DWORD ? ;   ; handle in reloc  // VA
+    GuardCFDispatchFunctionPointer  DWORD ?  ; // VA
+    GuardCFFunctionTable    DWORD ? ;           // VA
+    GuardCFFunctionCount    DWORD ? ;
+    GuardFlags  DWORD ? ;
+    CodeIntegrity   IMAGE_LOAD_CONFIG_CODE_INTEGRITY <>
+    GuardAddressTakenIatEntryTable  DWORD ?; // VA
+    GuardAddressTakenIatEntryCount  DWORD ?;
+    GuardLongJumpTargetTable    DWORD ?;       // VA
+    GuardLongJumpTargetCount    DWORD ? ;
+    DynamicValueRelocTable      DWORD ?;         // VA
+    CHPEMetadataPointer         DWORD ?;            // VA
+    GuardRFFailureRoutine       DWORD ? ;          // VA
+    GuardRFFailureRoutineFunctionPointer    DWORD ?; // VA
+    DynamicValueRelocTableOffset DWORD ?;
+    DynamicValueRelocTableSection WORD ?;
+    Reserved2   WORD ?;
+    GuardRFVerifyStackPointerFunctionPointer DWORD ?; // VA
+    HotPatchTableOffset DWORD ?;
+    Reserved3 DWORD ?;
+    EnclaveConfigurationPointer DWORD ?;     // VA
+    VolatileMetadataPointer DWORD ?;          // VA
+    GuardEHContinuationTable DWORD ?;        // VA
+    GuardEHContinuationCount DWORD ?;
+IMAGE_LOAD_CONFIG_DIRECTORY_FULL32	ends
 
 LoadPeFile proto CurrentStdcallNotation :ptr byte, :ptr byte, :cword
 UnloadPeFile proto CurrentStdcallNotation :cword
